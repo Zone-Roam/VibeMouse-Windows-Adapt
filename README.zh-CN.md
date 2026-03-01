@@ -142,6 +142,8 @@ sudo usermod -aG input $USER
 
 有些应用没有暴露标准可编辑可访问性元数据，此时会按设计回退到剪贴板。
 
+在 Hyprland 下，终端窗口（foot/kitty/alacritty/wezterm 等）会自动使用更适合终端的粘贴快捷键（优先 `Ctrl+Shift+V`，失败回退 `Shift+Insert`）。
+
 ### 后侧键回车不稳定
 
 可切换提交组合键并加大去抖：
@@ -157,6 +159,7 @@ systemctl --user restart vibemouse.service
 ```ini
 # ~/.config/hypr/UserConfigs/UserKeybinds.conf
 bind = , mouse:276, sendshortcut, , Return, activewindow
+# 如果你的物理后侧键是 X1，请改成 mouse:275
 ```
 
 ```bash

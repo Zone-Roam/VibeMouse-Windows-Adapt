@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import subprocess
 import time
@@ -71,6 +72,12 @@ class TextOutput:
         return "clipboard"
 
     def _paste_clipboard(self) -> None:
+        if self._is_hyprland_terminal_active():
+            if self._send_hyprland_shortcut(mod="CTRL SHIFT", key="V"):
+                return
+            if self._send_hyprland_shortcut(mod="SHIFT", key="Insert"):
+                return
+
         if self._send_hyprland_shortcut(mod="CTRL", key="V"):
             return
         self._kb.press(self._ctrl_key)
@@ -128,6 +135,72 @@ class TextOutput:
             return False
 
         return proc.returncode == 0 and proc.stdout.strip() == "ok"
+
+    def _is_hyprland_terminal_active(self) -> bool:
+        if not self._hyprland_session:
+            return False
+
+        try:
+            proc = subprocess.run(
+                ["hyprctl", "-j", "activewindow"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.0,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+        if proc.returncode != 0:
+            return False
+
+        try:
+            payload_obj = cast(object, json.loads(proc.stdout))
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(payload_obj, dict):
+            return False
+
+        payload_map = cast(dict[str, object], payload_obj)
+
+        window_class = str(payload_map.get("class", "")).lower()
+        initial_class = str(payload_map.get("initialClass", "")).lower()
+        title = str(payload_map.get("title", "")).lower()
+
+        terminal_hints = {
+            "foot",
+            "kitty",
+            "alacritty",
+            "wezterm",
+            "ghostty",
+            "gnome-terminal",
+            "gnome-terminal-server",
+            "konsole",
+            "tilix",
+            "xterm",
+            "terminator",
+            "xfce4-terminal",
+            "urxvt",
+            "st",
+            "tabby",
+            "hyper",
+            "warp",
+        }
+        if any(
+            hint in window_class or hint in initial_class for hint in terminal_hints
+        ):
+            return True
+
+        title_hints = {
+            "terminal",
+            "tmux",
+            "bash",
+            "zsh",
+            "fish",
+            "powershell",
+        }
+        return any(hint in title for hint in title_hints)
 
     @staticmethod
     def _load_atspi_module() -> object | None:

@@ -126,7 +126,9 @@ class VoiceMouseApp:
                     f"Transcribed with {backend} on {device}, typed into focused input"
                 )
             elif route == "pasted":
-                print(f"Transcribed with {backend} on {device}, pasted via Ctrl+V")
+                print(
+                    f"Transcribed with {backend} on {device}, pasted via system shortcut"
+                )
             elif route == "clipboard":
                 print(f"Transcribed with {backend} on {device}, copied to clipboard")
             else:

@@ -144,6 +144,8 @@ sudo usermod -aG input $USER
 
 Some apps do not expose editable accessibility metadata. In that case VibeMouse falls back to clipboard by design.
 
+On Hyprland, terminal windows (foot/kitty/alacritty/wezterm, etc.) use terminal-friendly paste shortcuts automatically (`Ctrl+Shift+V`, then `Shift+Insert` fallback).
+
 ### Rear button Enter feels unreliable
 
 Try a different submit combo and reduce accidental repeated clicks:
@@ -159,6 +161,7 @@ For Hyprland, you can move Enter to a compositor-level bind and disable VibeMous
 ```ini
 # ~/.config/hypr/UserConfigs/UserKeybinds.conf
 bind = , mouse:276, sendshortcut, , Return, activewindow
+# If your physical rear button is X1, use mouse:275 instead
 ```
 
 ```bash
