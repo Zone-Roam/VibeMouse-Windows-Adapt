@@ -172,6 +172,34 @@ class TextOutputRoutingTests(unittest.TestCase):
             ["openclaw", "agent", "--message", "hello", "--json", "--agent", "ops"],
         )
 
+    def test_send_to_openclaw_supports_wsl_bridge_command(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_openclaw_command", "wsl -d Ubuntu -- openclaw")
+
+        with patch(
+            "vibemouse.output.subprocess.Popen",
+            return_value=SimpleNamespace(),
+        ) as popen_mock:
+            route = subject.send_to_openclaw("hello")
+
+        self.assertEqual(route, "openclaw")
+        self.assertEqual(
+            popen_mock.call_args.args[0],
+            [
+                "wsl",
+                "-d",
+                "Ubuntu",
+                "--",
+                "openclaw",
+                "agent",
+                "--message",
+                "hello",
+                "--json",
+            ],
+        )
+
     def test_send_to_openclaw_invalid_command_falls_back_to_clipboard(self) -> None:
         subject = self._make_subject()
         keyboard = _FakeKeyboardController()

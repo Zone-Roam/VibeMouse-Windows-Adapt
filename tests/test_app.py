@@ -156,7 +156,16 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
             "_output",
             SimpleNamespace(send_enter=lambda mode: send_enter_calls.append(mode)),
         )
-        setattr(subject, "_config", SimpleNamespace(enter_mode="enter"))
+        setattr(
+            subject,
+            "_config",
+            SimpleNamespace(
+                enter_mode="enter",
+                openclaw_route_mode="always",
+            ),
+        )
+        setattr(subject, "_openclaw_route_lock", threading.Lock())
+        setattr(subject, "_openclaw_route_enabled", False)
 
         on_rear = cast(Callable[[], None], getattr(subject, "_on_rear_press"))
         on_rear()
@@ -214,7 +223,13 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
                         send_enter=lambda mode: send_enter_calls.append(mode)
                     ),
                 )
-                setattr(subject, "_config", SimpleNamespace(enter_mode="enter"))
+                setattr(
+                    subject,
+                    "_config",
+                    SimpleNamespace(enter_mode="enter", openclaw_route_mode="always"),
+                )
+                setattr(subject, "_openclaw_route_lock", threading.Lock())
+                setattr(subject, "_openclaw_route_enabled", False)
 
                 on_rear = cast(Callable[[], None], getattr(subject, "_on_rear_press"))
                 on_rear()
@@ -270,3 +285,67 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
         self.assertEqual(openclaw_calls, ["hello world"])
         self.assertEqual(inject_calls, [])
         self.assertEqual(removed_paths, [Path("/tmp/transcribe.wav")])
+
+    def test_rear_press_routes_to_default_when_toggle_mode_is_off(self) -> None:
+        subject = self._make_subject()
+        recording = SimpleNamespace(duration_s=1.2, path=Path("/tmp/voice.wav"))
+        setattr(
+            subject,
+            "_recorder",
+            SimpleNamespace(is_recording=True, stop_and_save=lambda: recording),
+        )
+
+        worker_calls: list[tuple[object, str]] = []
+        setattr(subject, "_set_recording_status", lambda value: None)
+        setattr(
+            subject,
+            "_start_transcription_worker",
+            lambda rec, *, output_target: worker_calls.append((rec, output_target)),
+        )
+        setattr(
+            subject,
+            "_config",
+            SimpleNamespace(
+                enter_mode="enter",
+                openclaw_route_mode="toggle",
+            ),
+        )
+        setattr(subject, "_openclaw_route_lock", threading.Lock())
+        setattr(subject, "_openclaw_route_enabled", False)
+
+        on_rear = cast(Callable[[], None], getattr(subject, "_on_rear_press"))
+        on_rear()
+
+        self.assertEqual(worker_calls, [(recording, "default")])
+
+    def test_rear_press_routes_to_openclaw_when_toggle_mode_is_on(self) -> None:
+        subject = self._make_subject()
+        recording = SimpleNamespace(duration_s=1.2, path=Path("/tmp/voice.wav"))
+        setattr(
+            subject,
+            "_recorder",
+            SimpleNamespace(is_recording=True, stop_and_save=lambda: recording),
+        )
+
+        worker_calls: list[tuple[object, str]] = []
+        setattr(subject, "_set_recording_status", lambda value: None)
+        setattr(
+            subject,
+            "_start_transcription_worker",
+            lambda rec, *, output_target: worker_calls.append((rec, output_target)),
+        )
+        setattr(
+            subject,
+            "_config",
+            SimpleNamespace(
+                enter_mode="enter",
+                openclaw_route_mode="toggle",
+            ),
+        )
+        setattr(subject, "_openclaw_route_lock", threading.Lock())
+        setattr(subject, "_openclaw_route_enabled", True)
+
+        on_rear = cast(Callable[[], None], getattr(subject, "_on_rear_press"))
+        on_rear()
+
+        self.assertEqual(worker_calls, [(recording, "openclaw")])

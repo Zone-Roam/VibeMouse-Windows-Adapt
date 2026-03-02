@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
 import threading
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from vibemouse.audio import AudioRecorder, AudioRecording
 from vibemouse.config import AppConfig
@@ -57,10 +58,22 @@ class VoiceMouseApp:
         self._workers_lock: threading.Lock = threading.Lock()
         self._workers: set[threading.Thread] = set()
         self._prewarm_started: bool = False
+        self._openclaw_route_lock: threading.Lock = threading.Lock()
+        self._openclaw_toggle_listener: _ToggleListener | None = None
+        self._openclaw_route_enabled: bool = self._initial_openclaw_route_enabled()
 
     def run(self) -> None:
+        self._start_openclaw_toggle_listener()
         self._listener.start()
         self._set_recording_status(False)
+        route_mode = self._config.openclaw_route_mode
+        if route_mode == "toggle":
+            route_detail = (
+                f"openclaw_route={self._openclaw_route_enabled}, "
+                + f"toggle_hotkey={self._config.openclaw_toggle_hotkey or 'disabled'}"
+            )
+        else:
+            route_detail = "openclaw_route=always"
         print(
             "VibeMouse ready. "
             + f"Model={self._config.model_name}, preferred_device={self._config.device}, "
@@ -72,8 +85,8 @@ class VoiceMouseApp:
             + f"gesture_threshold_px={self._config.gesture_threshold_px}, "
             + f"gesture_freeze_pointer={self._config.gesture_freeze_pointer}, "
             + f"gesture_restore_cursor={self._config.gesture_restore_cursor}, "
-            + f"prewarm_on_start={self._config.prewarm_on_start}. "
-            + "Press side-front to start/stop recording. While recording, side-rear sends transcript to OpenClaw; otherwise side-rear sends Enter."
+            + f"prewarm_on_start={self._config.prewarm_on_start}, {route_detail}. "
+            + "Press side-front to start/stop recording. Side-rear while idle sends Enter."
         )
         self._maybe_prewarm_transcriber()
         try:
@@ -85,6 +98,7 @@ class VoiceMouseApp:
 
     def shutdown(self) -> None:
         self._listener.stop()
+        self._stop_openclaw_toggle_listener()
         self._recorder.cancel()
         self._set_recording_status(False)
         with self._workers_lock:
@@ -132,8 +146,14 @@ class VoiceMouseApp:
             if recording is None:
                 return
 
-            print("Recording stopped by rear button, sending transcript to OpenClaw")
-            self._start_transcription_worker(recording, output_target="openclaw")
+            output_target = self._target_for_rear_recording()
+            if output_target == "openclaw":
+                print("Recording stopped by rear button, sending transcript to OpenClaw")
+            else:
+                print(
+                    "Recording stopped by rear button, OpenClaw routing disabled so using normal text output"
+                )
+            self._start_transcription_worker(recording, output_target=output_target)
             return
 
         try:
@@ -343,3 +363,90 @@ class VoiceMouseApp:
             _ = tmp_path.replace(path)
         except Exception:
             return
+
+    def _initial_openclaw_route_enabled(self) -> bool:
+        if self._config.openclaw_route_mode == "always":
+            return True
+        return bool(self._config.openclaw_toggle_initial)
+
+    def _target_for_rear_recording(self) -> TranscriptionTarget:
+        if self._config.openclaw_route_mode == "always":
+            return "openclaw"
+        with self._openclaw_route_lock:
+            return "openclaw" if self._openclaw_route_enabled else "default"
+
+    def _toggle_openclaw_route(self) -> None:
+        if self._config.openclaw_route_mode != "toggle":
+            return
+        with self._openclaw_route_lock:
+            self._openclaw_route_enabled = not self._openclaw_route_enabled
+            enabled = self._openclaw_route_enabled
+        if enabled:
+            print("OpenClaw routing: ON")
+        else:
+            print("OpenClaw routing: OFF")
+
+    def _start_openclaw_toggle_listener(self) -> None:
+        if self._config.openclaw_route_mode != "toggle":
+            return
+
+        hotkey = self._config.openclaw_toggle_hotkey.strip().lower()
+        if not hotkey or hotkey == "none":
+            print("OpenClaw route toggle hotkey disabled")
+            return
+
+        try:
+            keyboard_module = importlib.import_module("pynput.keyboard")
+            listener_ctor = getattr(keyboard_module, "Listener")
+        except Exception as error:
+            print(f"OpenClaw route hotkey unavailable: {error}")
+            return
+
+        if not callable(listener_ctor):
+            print("OpenClaw route hotkey unavailable: pynput Listener missing")
+            return
+
+        def on_release(key: object) -> None:
+            if self._normalize_key_name(key) == hotkey:
+                self._toggle_openclaw_route()
+
+        try:
+            listener = listener_ctor(on_release=on_release)
+            listener.start()
+        except Exception as error:
+            print(f"Failed to start OpenClaw route hotkey listener: {error}")
+            return
+
+        self._openclaw_toggle_listener = listener
+        print(
+            f"OpenClaw route toggle hotkey active: {self._config.openclaw_toggle_hotkey.upper()}"
+        )
+
+    def _stop_openclaw_toggle_listener(self) -> None:
+        listener = self._openclaw_toggle_listener
+        self._openclaw_toggle_listener = None
+        if listener is None:
+            return
+        try:
+            listener.stop()
+        except Exception:
+            return
+
+    @staticmethod
+    def _normalize_key_name(key: object) -> str:
+        name = getattr(key, "name", None)
+        if isinstance(name, str) and name.strip():
+            return name.strip().lower()
+        char = getattr(key, "char", None)
+        if isinstance(char, str) and char.strip():
+            return char.strip().lower()
+        key_text = str(key).strip().lower()
+        if key_text.startswith("key."):
+            return key_text.split(".", 1)[1]
+        return key_text
+
+
+class _ToggleListener(Protocol):
+    def start(self) -> None: ...
+    def stop(self) -> None:
+        ...

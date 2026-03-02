@@ -100,6 +100,9 @@ class AppConfig:
     openclaw_agent: str | None
     openclaw_timeout_s: float
     openclaw_retries: int
+    openclaw_route_mode: str
+    openclaw_toggle_initial: bool
+    openclaw_toggle_hotkey: str
     front_button: str
     rear_button: str
     temp_dir: Path
@@ -191,6 +194,13 @@ def load_config() -> AppConfig:
         "VIBEMOUSE_OPENCLAW_RETRIES",
         _read_int("VIBEMOUSE_OPENCLAW_RETRIES", 0),
     )
+    openclaw_route_mode = _read_choice(
+        "VIBEMOUSE_OPENCLAW_ROUTE_MODE",
+        "always",
+        {"always", "toggle"},
+    )
+    openclaw_toggle_initial = _read_bool("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", False)
+    openclaw_toggle_hotkey = os.getenv("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8").strip()
 
     return AppConfig(
         sample_rate=sample_rate,
@@ -225,6 +235,9 @@ def load_config() -> AppConfig:
         openclaw_agent=openclaw_agent,
         openclaw_timeout_s=openclaw_timeout_s,
         openclaw_retries=openclaw_retries,
+        openclaw_route_mode=openclaw_route_mode,
+        openclaw_toggle_initial=openclaw_toggle_initial,
+        openclaw_toggle_hotkey=openclaw_toggle_hotkey,
         front_button=front_button,
         rear_button=rear_button,
         temp_dir=temp_dir,

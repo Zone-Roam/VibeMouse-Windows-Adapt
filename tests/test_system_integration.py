@@ -146,6 +146,73 @@ class HyprlandSystemIntegrationTests(unittest.TestCase):
             (("CTRL", "V"),),
         )
 
+    def test_windows_send_shortcut_dispatches_keyboard_sequence(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class _FakeController:
+            @staticmethod
+            def press(key: object) -> None:
+                events.append(("press", key))
+
+            @staticmethod
+            def release(key: object) -> None:
+                events.append(("release", key))
+
+        key_holder = SimpleNamespace(
+            ctrl="CTRL",
+            shift="SHIFT",
+            alt="ALT",
+            cmd="CMD",
+            enter="ENTER",
+            insert="INSERT",
+        )
+        integration = WindowsSystemIntegration(
+            keyboard_controller=_FakeController(),
+            key_holder=key_holder,
+        )
+        ok = integration.send_shortcut(mod="CTRL SHIFT", key="V")
+
+        self.assertTrue(ok)
+        self.assertEqual(
+            events,
+            [
+                ("press", "CTRL"),
+                ("press", "SHIFT"),
+                ("press", "v"),
+                ("release", "v"),
+                ("release", "SHIFT"),
+                ("release", "CTRL"),
+            ],
+        )
+
+    def test_windows_send_shortcut_returns_false_for_unsupported_main_key(self) -> None:
+        key_holder = SimpleNamespace(
+            ctrl="CTRL",
+            shift="SHIFT",
+            alt="ALT",
+            cmd="CMD",
+            enter="ENTER",
+            insert="INSERT",
+        )
+        integration = WindowsSystemIntegration(
+            keyboard_controller=SimpleNamespace(press=lambda key: None, release=lambda key: None),
+            key_holder=key_holder,
+        )
+        self.assertFalse(integration.send_shortcut(mod="CTRL", key="F13"))
+
+    def test_windows_terminal_active_detection_uses_active_window_payload(self) -> None:
+        integration = WindowsSystemIntegration()
+        with patch.object(
+            integration,
+            "active_window",
+            return_value={
+                "class": "CASCADIA_HOSTING_WINDOW_CLASS",
+                "initialClass": "CASCADIA_HOSTING_WINDOW_CLASS",
+                "title": "Windows Terminal",
+            },
+        ):
+            self.assertTrue(integration.is_terminal_window_active())
+
     def test_macos_paste_shortcuts_use_cmd_v(self) -> None:
         integration = MacOSSystemIntegration()
         self.assertEqual(

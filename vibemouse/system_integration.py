@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import importlib
 import json
 import os
@@ -120,6 +121,55 @@ class NoopSystemIntegration:
 
 
 class WindowsSystemIntegration(NoopSystemIntegration):
+    def __init__(
+        self,
+        *,
+        keyboard_controller: object | None = None,
+        key_holder: object | None = None,
+    ) -> None:
+        self._keyboard_controller: object | None = keyboard_controller
+        self._key_holder: object | None = key_holder
+
+    def send_shortcut(self, *, mod: str, key: str) -> bool:
+        keyboard, key_holder = self._ensure_keyboard_objects()
+        if keyboard is None or key_holder is None:
+            return False
+
+        modifiers = self._resolve_modifier_keys(mod, key_holder)
+        main_key = self._resolve_main_key(key, key_holder)
+        if main_key is None:
+            return False
+
+        try:
+            for modifier in modifiers:
+                self._keyboard_press(keyboard, modifier)
+            self._keyboard_press(keyboard, main_key)
+            self._keyboard_release(keyboard, main_key)
+            for modifier in reversed(modifiers):
+                self._keyboard_release(keyboard, modifier)
+            return True
+        except Exception:
+            return False
+
+    def active_window(self) -> dict[str, object] | None:
+        return self._query_windows_active_window()
+
+    def cursor_position(self) -> tuple[int, int] | None:
+        return self._query_windows_cursor_position()
+
+    def move_cursor(self, *, x: int, y: int) -> bool:
+        return self._move_windows_cursor(x=x, y=y)
+
+    def switch_workspace(self, direction: str) -> bool:
+        del direction
+        return False
+
+    def is_terminal_window_active(self) -> bool | None:
+        payload = self.active_window()
+        if payload is None:
+            return False
+        return is_terminal_window_payload(payload)
+
     def paste_shortcuts(self, *, terminal_active: bool) -> tuple[tuple[str, str], ...]:
         if terminal_active:
             return (
@@ -128,6 +178,161 @@ class WindowsSystemIntegration(NoopSystemIntegration):
                 ("CTRL", "V"),
             )
         return (("CTRL", "V"),)
+
+    def _ensure_keyboard_objects(self) -> tuple[object | None, object | None]:
+        if self._keyboard_controller is not None and self._key_holder is not None:
+            return self._keyboard_controller, self._key_holder
+
+        try:
+            keyboard_module = importlib.import_module("pynput.keyboard")
+        except Exception:
+            return None, None
+
+        try:
+            controller_ctor = cast(object, getattr(keyboard_module, "Controller"))
+            key_holder = cast(object, getattr(keyboard_module, "Key"))
+        except Exception:
+            return None, None
+
+        if not callable(controller_ctor):
+            return None, None
+
+        try:
+            controller = controller_ctor()
+        except Exception:
+            return None, None
+
+        self._keyboard_controller = controller
+        self._key_holder = key_holder
+        return controller, key_holder
+
+    @staticmethod
+    def _resolve_modifier_keys(mod: str, key_holder: object) -> list[object]:
+        mapping = {
+            "CTRL": "ctrl",
+            "SHIFT": "shift",
+            "ALT": "alt",
+            "CMD": "cmd",
+            "WIN": "cmd",
+            "META": "cmd",
+        }
+        resolved: list[object] = []
+        for token in mod.strip().upper().split():
+            attr = mapping.get(token)
+            if attr is None:
+                continue
+            value = getattr(key_holder, attr, None)
+            if value is not None:
+                resolved.append(value)
+        return resolved
+
+    @staticmethod
+    def _resolve_main_key(key: str, key_holder: object) -> object | None:
+        normalized = key.strip()
+        if not normalized:
+            return None
+        if len(normalized) == 1:
+            return normalized.lower()
+
+        mapping = {
+            "ENTER": "enter",
+            "RETURN": "enter",
+            "INSERT": "insert",
+            "TAB": "tab",
+            "SPACE": "space",
+            "ESC": "esc",
+            "ESCAPE": "esc",
+        }
+        attr = mapping.get(normalized.upper())
+        if attr is None:
+            return None
+        return getattr(key_holder, attr, None)
+
+    @staticmethod
+    def _keyboard_press(controller: object, key: object) -> None:
+        press = cast(object, getattr(controller, "press"))
+        cast(_PressReleaseFn, press)(key)
+
+    @staticmethod
+    def _keyboard_release(controller: object, key: object) -> None:
+        release = cast(object, getattr(controller, "release"))
+        cast(_PressReleaseFn, release)(key)
+
+    @staticmethod
+    def _query_windows_active_window() -> dict[str, object] | None:
+        if not sys.platform.startswith("win"):
+            return None
+
+        user32 = _load_windows_user32()
+        kernel32 = _load_windows_kernel32()
+        if user32 is None or kernel32 is None:
+            return None
+
+        hwnd = int(user32.GetForegroundWindow())
+        if hwnd == 0:
+            return None
+
+        title_buf = ctypes.create_unicode_buffer(512)
+        class_buf = ctypes.create_unicode_buffer(256)
+
+        _ = user32.GetWindowTextW(hwnd, title_buf, len(title_buf))
+        _ = user32.GetClassNameW(hwnd, class_buf, len(class_buf))
+
+        pid = ctypes.c_ulong(0)
+        _ = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        process_name = ""
+        process_handle = kernel32.OpenProcess(0x1000, False, pid.value)
+        if process_handle:
+            image_buf = ctypes.create_unicode_buffer(512)
+            size = ctypes.c_ulong(len(image_buf))
+            ok = kernel32.QueryFullProcessImageNameW(
+                process_handle,
+                0,
+                image_buf,
+                ctypes.byref(size),
+            )
+            _ = kernel32.CloseHandle(process_handle)
+            if ok:
+                raw_path = image_buf.value
+                if raw_path:
+                    process_name = os.path.basename(raw_path).lower()
+
+        window_class = class_buf.value
+        return {
+            "hwnd": hwnd,
+            "title": title_buf.value,
+            "class": window_class,
+            "initialClass": window_class,
+            "pid": int(pid.value),
+            "process": process_name,
+        }
+
+    @staticmethod
+    def _query_windows_cursor_position() -> tuple[int, int] | None:
+        if not sys.platform.startswith("win"):
+            return None
+
+        user32 = _load_windows_user32()
+        if user32 is None:
+            return None
+
+        point = _WindowsPoint()
+        ok = user32.GetCursorPos(ctypes.byref(point))
+        if not ok:
+            return None
+        return int(point.x), int(point.y)
+
+    @staticmethod
+    def _move_windows_cursor(*, x: int, y: int) -> bool:
+        if not sys.platform.startswith("win"):
+            return False
+
+        user32 = _load_windows_user32()
+        if user32 is None:
+            return False
+
+        ok = user32.SetCursorPos(int(x), int(y))
+        return bool(ok)
 
 
 class MacOSSystemIntegration(NoopSystemIntegration):
@@ -339,3 +544,29 @@ class _GenerateKeyboardEventFn(Protocol):
 
 class _RequireVersionFn(Protocol):
     def __call__(self, namespace: str, version: str) -> None: ...
+
+
+class _PressReleaseFn(Protocol):
+    def __call__(self, key: object) -> None: ...
+
+
+class _WindowsPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def _load_windows_user32() -> object | None:
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        return cast(object, ctypes.windll.user32)
+    except Exception:
+        return None
+
+
+def _load_windows_kernel32() -> object | None:
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        return cast(object, ctypes.windll.kernel32)
+    except Exception:
+        return None

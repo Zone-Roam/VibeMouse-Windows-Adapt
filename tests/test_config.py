@@ -31,6 +31,9 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_agent, "main")
         self.assertEqual(config.openclaw_timeout_s, 20.0)
         self.assertEqual(config.openclaw_retries, 0)
+        self.assertEqual(config.openclaw_route_mode, "always")
+        self.assertFalse(config.openclaw_toggle_initial)
+        self.assertEqual(config.openclaw_toggle_hotkey, "f8")
         self.assertEqual(config.front_button, "x1")
         self.assertEqual(config.rear_button, "x2")
 
@@ -92,7 +95,7 @@ class LoadConfigTests(unittest.TestCase):
         ):
             config = load_config()
 
-        self.assertEqual(str(config.status_file), "/tmp/custom-vibemouse-status.json")
+        self.assertEqual(config.status_file.name, "custom-vibemouse-status.json")
 
     def test_enter_mode_can_be_configured(self) -> None:
         with patch.dict(os.environ, {"VIBEMOUSE_ENTER_MODE": "ctrl_enter"}, clear=True):
@@ -212,6 +215,9 @@ class LoadConfigTests(unittest.TestCase):
                 "VIBEMOUSE_OPENCLAW_AGENT": "ops-bot",
                 "VIBEMOUSE_OPENCLAW_TIMEOUT_S": "7.5",
                 "VIBEMOUSE_OPENCLAW_RETRIES": "2",
+                "VIBEMOUSE_OPENCLAW_ROUTE_MODE": "toggle",
+                "VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL": "true",
+                "VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY": "f9",
             },
             clear=True,
         ):
@@ -221,6 +227,21 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_agent, "ops-bot")
         self.assertEqual(config.openclaw_timeout_s, 7.5)
         self.assertEqual(config.openclaw_retries, 2)
+        self.assertEqual(config.openclaw_route_mode, "toggle")
+        self.assertTrue(config.openclaw_toggle_initial)
+        self.assertEqual(config.openclaw_toggle_hotkey, "f9")
+
+    def test_invalid_openclaw_route_mode_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_OPENCLAW_ROUTE_MODE": "manual"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_OPENCLAW_ROUTE_MODE must be one of",
+            ):
+                _ = load_config()
 
     def test_empty_openclaw_command_is_rejected(self) -> None:
         with patch.dict(
