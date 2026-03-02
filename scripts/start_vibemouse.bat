@@ -19,6 +19,10 @@ set "VIBEMOUSE_MODEL=iic/SenseVoiceSmall"
 set "VIBEMOUSE_DEVICE=cpu"
 set "VIBEMOUSE_LANGUAGE=auto"
 set "VIBEMOUSE_USE_ITN=true"
+set "VIBEMOUSE_AUTO_PASTE=true"
+set "VIBEMOUSE_FRONT_BUTTON=x2"
+set "VIBEMOUSE_REAR_BUTTON=x1"
+set "PYTHONUNBUFFERED=1"
 
 set "VIBEMOUSE_OPENCLAW_ROUTE_MODE=toggle"
 set "VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL=false"
@@ -32,5 +36,5 @@ echo [INFO] Toggle OpenClaw route hotkey: F8
 echo [INFO] Status file: "%VIBEMOUSE_STATUS_FILE%"
 echo.
 
-"%VENV_PYTHON%" -m vibemouse.main run
+"%VENV_PYTHON%" -u -m vibemouse.main run
 exit /b %ERRORLEVEL%

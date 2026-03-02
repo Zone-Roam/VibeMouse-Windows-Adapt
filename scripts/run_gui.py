@@ -82,6 +82,10 @@ class VibeMouseGui:
         env["VIBEMOUSE_DEVICE"] = "cpu"
         env["VIBEMOUSE_LANGUAGE"] = "auto"
         env["VIBEMOUSE_USE_ITN"] = "true"
+        env["VIBEMOUSE_AUTO_PASTE"] = "true"
+        env["VIBEMOUSE_FRONT_BUTTON"] = "x2"
+        env["VIBEMOUSE_REAR_BUTTON"] = "x1"
+        env["PYTHONUNBUFFERED"] = "1"
 
         env["VIBEMOUSE_OPENCLAW_ROUTE_MODE"] = "toggle"
         env["VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL"] = "false"
@@ -104,7 +108,7 @@ class VibeMouseGui:
         env = self.build_env()
         self.log("[INFO] Starting VibeMouse process...")
         self.process = subprocess.Popen(
-            [str(self.venv_python), "-m", "vibemouse.main", "run"],
+            [str(self.venv_python), "-u", "-m", "vibemouse.main", "run"],
             cwd=str(self.project_root),
             env=env,
             stdout=subprocess.PIPE,

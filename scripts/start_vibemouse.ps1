@@ -20,6 +20,10 @@ $env:VIBEMOUSE_MODEL = "iic/SenseVoiceSmall"
 $env:VIBEMOUSE_DEVICE = "cpu"
 $env:VIBEMOUSE_LANGUAGE = "auto"
 $env:VIBEMOUSE_USE_ITN = "true"
+$env:VIBEMOUSE_AUTO_PASTE = "true"
+$env:VIBEMOUSE_FRONT_BUTTON = "x2"
+$env:VIBEMOUSE_REAR_BUTTON = "x1"
+$env:PYTHONUNBUFFERED = "1"
 
 $env:VIBEMOUSE_OPENCLAW_ROUTE_MODE = "toggle"
 $env:VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL = "false"
@@ -33,5 +37,5 @@ Write-Host "[INFO] Toggle OpenClaw route hotkey: F8"
 Write-Host "[INFO] Status file: $($env:VIBEMOUSE_STATUS_FILE)"
 Write-Host ""
 
-& $venvPython -m vibemouse.main run
+& $venvPython -u -m vibemouse.main run
 exit $LASTEXITCODE
