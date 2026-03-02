@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import subprocess
 import time
 from typing import Protocol, cast
 
 import pyperclip
 
+from vibemouse.system_integration import (
+    SystemIntegration,
+    create_system_integration,
+    is_terminal_window_payload,
+    load_atspi_module,
+    probe_text_input_focus_via_atspi,
+    probe_send_enter_via_atspi,
+)
+
 
 class TextOutput:
-    def __init__(self) -> None:
+    def __init__(self, *, system_integration: SystemIntegration | None = None) -> None:
         try:
             keyboard_module = importlib.import_module("pynput.keyboard")
         except Exception as error:
@@ -31,8 +39,13 @@ class TextOutput:
         self._enter_key: object = key_holder.enter
         self._ctrl_key: object = key_holder.ctrl
         self._shift_key: object = key_holder.shift
-        self._atspi: object | None = self._load_atspi_module()
-        self._hyprland_session: bool = self._detect_hyprland_session()
+        self._atspi: object | None = load_atspi_module()
+        self._system_integration: SystemIntegration = (
+            system_integration
+            if system_integration is not None
+            else create_system_integration()
+        )
+        self._hyprland_session: bool = self._system_integration.is_hyprland
 
     def send_enter(self, *, mode: str = "enter") -> None:
         normalized = mode.strip().lower()
@@ -72,14 +85,11 @@ class TextOutput:
         return "clipboard"
 
     def _paste_clipboard(self) -> None:
-        if self._is_hyprland_terminal_active():
-            if self._send_hyprland_shortcut(mod="CTRL SHIFT", key="V"):
-                return
-            if self._send_hyprland_shortcut(mod="SHIFT", key="Insert"):
+        terminal_active = self._is_hyprland_terminal_active()
+        for mod, key in self._paste_shortcuts(terminal_active=terminal_active):
+            if self._send_platform_shortcut(mod=mod, key=key):
                 return
 
-        if self._send_hyprland_shortcut(mod="CTRL", key="V"):
-            return
         self._kb.press(self._ctrl_key)
         self._kb.press("v")
         self._kb.release("v")
@@ -98,22 +108,65 @@ class TextOutput:
         self._kb.release(modifier)
 
     def _send_enter_via_atspi(self) -> bool:
-        atspi_module = self._atspi
-        if atspi_module is None:
-            return False
-
         try:
-            key_synth = cast(object, getattr(atspi_module, "KeySynthType"))
-            press_release = cast(object, getattr(key_synth, "PRESSRELEASE"))
-            generate_keyboard_event = cast(
-                _GenerateKeyboardEventFn,
-                getattr(atspi_module, "generate_keyboard_event"),
-            )
-            return bool(generate_keyboard_event(65293, None, press_release))
-        except Exception:
-            return False
+            system_integration = self._system_integration
+        except AttributeError:
+            system_integration = None
 
-    def _send_hyprland_shortcut(self, *, mod: str, key: str) -> bool:
+        if system_integration is not None:
+            try:
+                handled = system_integration.send_enter_via_accessibility()
+            except Exception:
+                handled = None
+            if handled is True:
+                return True
+
+        atspi_module = getattr(self, "_atspi", None)
+        return probe_send_enter_via_atspi(
+            atspi_module=atspi_module,
+            lazy_load=False,
+        )
+
+    def _paste_shortcuts(self, *, terminal_active: bool) -> tuple[tuple[str, str], ...]:
+        try:
+            system_integration = self._system_integration
+        except AttributeError:
+            system_integration = None
+
+        if system_integration is not None:
+            try:
+                shortcuts = system_integration.paste_shortcuts(
+                    terminal_active=terminal_active
+                )
+            except Exception:
+                shortcuts = ()
+            if shortcuts:
+                return shortcuts
+
+        if terminal_active:
+            return (
+                ("CTRL SHIFT", "V"),
+                ("SHIFT", "Insert"),
+                ("CTRL", "V"),
+            )
+        return (("CTRL", "V"),)
+
+    def _send_platform_shortcut(self, *, mod: str, key: str) -> bool:
+        try:
+            system_integration = self._system_integration
+        except AttributeError:
+            system_integration = None
+
+        if system_integration is not None:
+            try:
+                if bool(system_integration.send_shortcut(mod=mod, key=key)):
+                    return True
+                if not self._hyprland_session:
+                    return False
+            except Exception:
+                if not self._hyprland_session:
+                    return False
+
         if not self._hyprland_session:
             return False
 
@@ -136,122 +189,72 @@ class TextOutput:
 
         return proc.returncode == 0 and proc.stdout.strip() == "ok"
 
-    def _is_hyprland_terminal_active(self) -> bool:
+    def _send_hyprland_shortcut(self, *, mod: str, key: str) -> bool:
+        return self._send_platform_shortcut(mod=mod, key=key)
+
+    def _is_terminal_window_active(self) -> bool:
+        payload_map: dict[str, object] | None = None
+        try:
+            system_integration = self._system_integration
+        except AttributeError:
+            system_integration = None
+
+        if system_integration is not None:
+            try:
+                terminal_active = system_integration.is_terminal_window_active()
+            except Exception:
+                terminal_active = None
+            if isinstance(terminal_active, bool):
+                return terminal_active
+
         if not self._hyprland_session:
             return False
 
-        try:
-            proc = subprocess.run(
-                ["hyprctl", "-j", "activewindow"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=1.0,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return False
+        if payload_map is None:
+            try:
+                proc = subprocess.run(
+                    ["hyprctl", "-j", "activewindow"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=1.0,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
 
-        if proc.returncode != 0:
-            return False
+            if proc.returncode != 0:
+                return False
 
-        try:
-            payload_obj = cast(object, json.loads(proc.stdout))
-        except json.JSONDecodeError:
-            return False
+            try:
+                payload_obj = cast(object, json.loads(proc.stdout))
+            except json.JSONDecodeError:
+                return False
 
-        if not isinstance(payload_obj, dict):
-            return False
+            if not isinstance(payload_obj, dict):
+                return False
 
-        payload_map = cast(dict[str, object], payload_obj)
+            payload_map = cast(dict[str, object], payload_obj)
 
-        window_class = str(payload_map.get("class", "")).lower()
-        initial_class = str(payload_map.get("initialClass", "")).lower()
-        title = str(payload_map.get("title", "")).lower()
+        return is_terminal_window_payload(payload_map)
 
-        terminal_hints = {
-            "foot",
-            "kitty",
-            "alacritty",
-            "wezterm",
-            "ghostty",
-            "gnome-terminal",
-            "gnome-terminal-server",
-            "konsole",
-            "tilix",
-            "xterm",
-            "terminator",
-            "xfce4-terminal",
-            "urxvt",
-            "st",
-            "tabby",
-            "hyper",
-            "warp",
-        }
-        if any(
-            hint in window_class or hint in initial_class for hint in terminal_hints
-        ):
-            return True
-
-        title_hints = {
-            "terminal",
-            "tmux",
-            "bash",
-            "zsh",
-            "fish",
-            "powershell",
-        }
-        return any(hint in title for hint in title_hints)
-
-    @staticmethod
-    def _load_atspi_module() -> object | None:
-        try:
-            gi = importlib.import_module("gi")
-            require_version = cast(_RequireVersionFn, getattr(gi, "require_version"))
-            require_version("Atspi", "2.0")
-            atspi_repo = cast(object, importlib.import_module("gi.repository"))
-            return cast(object, getattr(atspi_repo, "Atspi"))
-        except Exception:
-            return None
-
-    @staticmethod
-    def _detect_hyprland_session() -> bool:
-        desktop = os.getenv("XDG_CURRENT_DESKTOP", "")
-        if "hyprland" in desktop.lower():
-            return True
-        return bool(os.getenv("HYPRLAND_INSTANCE_SIGNATURE"))
+    def _is_hyprland_terminal_active(self) -> bool:
+        return self._is_terminal_window_active()
 
     def _is_text_input_focused(self) -> bool:
-        script = (
-            "import gi\n"
-            "gi.require_version('Atspi', '2.0')\n"
-            "from gi.repository import Atspi\n"
-            "obj = Atspi.get_desktop(0).get_focus()\n"
-            "editable = False\n"
-            "role = ''\n"
-            "if obj is not None:\n"
-            "    role = obj.get_role_name().lower()\n"
-            "    attrs = obj.get_attributes() or []\n"
-            "    for it in attrs:\n"
-            "        s = str(it).lower()\n"
-            "        if s == 'editable:true' or s.endswith(':editable:true'):\n"
-            "            editable = True\n"
-            "            break\n"
-            "roles = {'text', 'entry', 'password text', 'terminal', 'paragraph', 'document text', 'document web'}\n"
-            "print('1' if editable or role in roles else '0')\n"
-        )
-
         try:
-            proc = subprocess.run(
-                ["python3", "-c", script],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=1.5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return False
+            system_integration = self._system_integration
+        except AttributeError:
+            system_integration = None
 
-        return proc.returncode == 0 and proc.stdout.strip() == "1"
+        if system_integration is not None:
+            try:
+                focused = system_integration.is_text_input_focused()
+            except Exception:
+                focused = None
+            if isinstance(focused, bool):
+                return focused
+
+        return probe_text_input_focus_via_atspi()
 
 
 class _KeyboardController(Protocol):
@@ -270,16 +273,3 @@ class _KeyHolder(Protocol):
     enter: object
     ctrl: object
     shift: object
-
-
-class _GenerateKeyboardEventFn(Protocol):
-    def __call__(
-        self,
-        keyval: int,
-        keystring: str | None,
-        synth_type: object,
-    ) -> bool: ...
-
-
-class _RequireVersionFn(Protocol):
-    def __call__(self, namespace: str, version: str) -> None: ...

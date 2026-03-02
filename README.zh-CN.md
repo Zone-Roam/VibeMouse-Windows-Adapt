@@ -110,9 +110,20 @@ vibemouse
 | `VIBEMOUSE_DEVICE` | `cpu` | 设备偏好（`cpu`、`cuda:0`、`npu:0`） |
 | `VIBEMOUSE_FALLBACK_CPU` | `true` | 首选设备失败时是否回退 CPU |
 | `VIBEMOUSE_BUTTON_DEBOUNCE_MS` | `150` | 侧键去抖窗口（毫秒），窗口内重复触发会被忽略 |
+| `VIBEMOUSE_GESTURES_ENABLED` | `false` | 是否启用侧键鼠标手势识别 |
+| `VIBEMOUSE_GESTURE_TRIGGER_BUTTON` | `rear` | 手势触发键（`front`、`rear` 或 `right`） |
+| `VIBEMOUSE_GESTURE_THRESHOLD_PX` | `120` | 识别为手势所需的最小移动距离 |
+| `VIBEMOUSE_GESTURE_FREEZE_POINTER` | `true` | 手势期间独占鼠标设备，减少光标漂移 |
+| `VIBEMOUSE_GESTURE_RESTORE_CURSOR` | `true` | 手势动作触发后恢复光标位置 |
+| `VIBEMOUSE_GESTURE_UP_ACTION` | `record_toggle` | `up` 手势动作：`record_toggle`、`send_enter`、`workspace_left`、`workspace_right`、`noop` |
+| `VIBEMOUSE_GESTURE_DOWN_ACTION` | `noop` | `down` 手势动作：`record_toggle`、`send_enter`、`workspace_left`、`workspace_right`、`noop` |
+| `VIBEMOUSE_GESTURE_LEFT_ACTION` | `noop` | `left` 手势动作：`record_toggle`、`send_enter`、`workspace_left`、`workspace_right`、`noop` |
+| `VIBEMOUSE_GESTURE_RIGHT_ACTION` | `send_enter` | `right` 手势动作：`record_toggle`、`send_enter`、`workspace_left`、`workspace_right`、`noop` |
 | `VIBEMOUSE_ENTER_MODE` | `enter` | 后侧键提交模式：`enter`、`ctrl_enter`、`shift_enter`、`none` |
 | `VIBEMOUSE_AUTO_PASTE` | `false` | 回退到剪贴板时自动发送 `Ctrl+V` 粘贴 |
 | `VIBEMOUSE_TRUST_REMOTE_CODE` | `false` | 仅在可信模型明确要求远端代码时设为 `true` |
+| `VIBEMOUSE_PREWARM_ON_START` | `true` | 启动时预热 ASR 后端，缩短首次识别等待时间 |
+| `VIBEMOUSE_STATUS_FILE` | `$XDG_RUNTIME_DIR/vibemouse-status.json` | 供顶栏读取的运行状态文件 |
 | `VIBEMOUSE_LANGUAGE` | `auto` | `auto`、`zh`、`en`、`yue`、`ja`、`ko` |
 | `VIBEMOUSE_USE_ITN` | `true` | 是否开启文本归一化 |
 | `VIBEMOUSE_ENABLE_VAD` | `true` | 是否开启 VAD |
@@ -166,6 +177,61 @@ bind = , mouse:276, sendshortcut, , Return, activewindow
 export VIBEMOUSE_ENTER_MODE=none
 systemctl --user restart vibemouse.service
 hyprctl reload config-only
+```
+
+### 鼠标手势没有触发动作
+
+请先开启手势并指定触发键：
+
+```bash
+export VIBEMOUSE_GESTURES_ENABLED=true
+export VIBEMOUSE_GESTURE_TRIGGER_BUTTON=rear
+export VIBEMOUSE_GESTURE_THRESHOLD_PX=120
+systemctl --user restart vibemouse.service
+```
+
+默认手势映射为：
+
+- `up` -> 切换录音（开始/停止）
+- `right` -> 发送 Enter
+- `down` / `left` -> 无动作
+
+你可以通过 `VIBEMOUSE_GESTURE_*_ACTION` 重映射各方向动作。
+
+如果按住触发键时仍有明显光标漂移，请保持
+`VIBEMOUSE_GESTURE_FREEZE_POINTER=true`（默认值）。在 Hyprland + Arch 这类
+可用 evdev 的环境下，它会在手势期间独占鼠标设备来降低漂移。
+
+### Hyprland 右键手势切换桌面
+
+如果你希望“按住右键后左右滑动”来切换工作区：
+
+```bash
+export VIBEMOUSE_GESTURES_ENABLED=true
+export VIBEMOUSE_GESTURE_TRIGGER_BUTTON=right
+export VIBEMOUSE_GESTURE_LEFT_ACTION=workspace_left
+export VIBEMOUSE_GESTURE_RIGHT_ACTION=workspace_right
+export VIBEMOUSE_GESTURE_THRESHOLD_PX=190
+export VIBEMOUSE_GESTURE_FREEZE_POINTER=false
+export VIBEMOUSE_GESTURE_RESTORE_CURSOR=true
+export VIBEMOUSE_GESTURE_UP_ACTION=noop
+export VIBEMOUSE_GESTURE_DOWN_ACTION=noop
+systemctl --user restart vibemouse.service
+```
+
+### 启动后或长时间空闲后首次识别较慢
+
+可开启启动预热，让 ASR 后端在首次说话前先加载：
+
+```bash
+export VIBEMOUSE_PREWARM_ON_START=true
+systemctl --user restart vibemouse.service
+```
+
+可用以下命令确认预热日志：
+
+```bash
+journalctl --user -u vibemouse.service -n 30 --no-pager | rg "prewarm"
 ```
 
 ### 能录音但识别为空

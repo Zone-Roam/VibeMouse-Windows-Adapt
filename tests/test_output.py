@@ -42,7 +42,7 @@ class TextOutputFocusProbeTests(unittest.TestCase):
                 captured_timeouts.append(timeout)
             return SimpleNamespace(returncode=0, stdout="1\n")
 
-        with patch("vibemouse.output.subprocess.run", side_effect=fake_run):
+        with patch("vibemouse.system_integration.subprocess.run", side_effect=fake_run):
             subject = self._make_subject()
             probe = cast(Callable[[], bool], getattr(subject, "_is_text_input_focused"))
             call_probe: Callable[[], bool] = probe
@@ -52,7 +52,7 @@ class TextOutputFocusProbeTests(unittest.TestCase):
         self.assertEqual(captured_timeouts, [1.5])
 
     @patch(
-        "vibemouse.output.subprocess.run",
+        "vibemouse.system_integration.subprocess.run",
         side_effect=subprocess.TimeoutExpired(
             cmd=["python3", "-c", "..."], timeout=1.5
         ),
@@ -62,11 +62,47 @@ class TextOutputFocusProbeTests(unittest.TestCase):
         probe = cast(Callable[[], bool], getattr(subject, "_is_text_input_focused"))
         self.assertFalse(probe())
 
-    @patch("vibemouse.output.subprocess.run", side_effect=OSError("spawn failed"))
+    @patch(
+        "vibemouse.system_integration.subprocess.run",
+        side_effect=OSError("spawn failed"),
+    )
     def test_focus_probe_oserror_returns_false(self, _mock_run: object) -> None:
         subject = self._make_subject()
         probe = cast(Callable[[], bool], getattr(subject, "_is_text_input_focused"))
         self.assertFalse(probe())
+
+    def test_focus_probe_prefers_system_integration_result(self) -> None:
+        subject = self._make_subject()
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(is_text_input_focused=lambda: True),
+        )
+
+        with patch(
+            "vibemouse.output.probe_text_input_focus_via_atspi"
+        ) as fallback_probe:
+            probe = cast(Callable[[], bool], getattr(subject, "_is_text_input_focused"))
+            self.assertTrue(probe())
+
+        self.assertEqual(fallback_probe.call_count, 0)
+
+    def test_focus_probe_falls_back_when_integration_returns_none(self) -> None:
+        subject = self._make_subject()
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(is_text_input_focused=lambda: None),
+        )
+
+        with patch(
+            "vibemouse.output.probe_text_input_focus_via_atspi",
+            return_value=True,
+        ) as fallback_probe:
+            probe = cast(Callable[[], bool], getattr(subject, "_is_text_input_focused"))
+            self.assertTrue(probe())
+
+        self.assertEqual(fallback_probe.call_count, 1)
 
 
 class TextOutputRoutingTests(unittest.TestCase):
@@ -82,6 +118,17 @@ class TextOutputRoutingTests(unittest.TestCase):
         setattr(subject, "_enter_key", "ENTER")
         setattr(subject, "_atspi", None)
         setattr(subject, "_hyprland_session", False)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(
+                send_shortcut=lambda mod, key: False,
+                is_terminal_window_active=lambda: None,
+                paste_shortcuts=lambda terminal_active: (),
+                send_enter_via_accessibility=lambda: None,
+                is_text_input_focused=lambda: None,
+            ),
+        )
 
     @staticmethod
     def _not_focused() -> bool:
@@ -110,6 +157,70 @@ class TextOutputRoutingTests(unittest.TestCase):
         keyboard = _FakeKeyboardController()
         self._bind_keyboard(subject, keyboard)
         setattr(subject, "_is_text_input_focused", self._not_focused)
+
+        with patch("vibemouse.output.pyperclip.copy") as copy_mock:
+            route = subject.inject_or_clipboard("hello", auto_paste=True)
+
+        self.assertEqual(route, "pasted")
+        self.assertEqual(copy_mock.call_count, 1)
+        self.assertEqual(
+            keyboard.events,
+            [
+                ("press", "CTRL"),
+                ("press", "v"),
+                ("release", "v"),
+                ("release", "CTRL"),
+            ],
+        )
+
+    def test_auto_paste_uses_system_shortcut_candidates_when_available(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_is_text_input_focused", self._not_focused)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(
+                send_shortcut=lambda mod, key: mod == "ALT" and key == "V",
+                is_terminal_window_active=lambda: True,
+                paste_shortcuts=lambda terminal_active: (("ALT", "V"),)
+                if terminal_active
+                else (),
+                send_enter_via_accessibility=lambda: None,
+                is_text_input_focused=lambda: None,
+            ),
+        )
+
+        with (
+            patch("vibemouse.output.pyperclip.copy") as copy_mock,
+            patch("vibemouse.output.subprocess.run") as run_mock,
+        ):
+            route = subject.inject_or_clipboard("hello", auto_paste=True)
+
+        self.assertEqual(route, "pasted")
+        self.assertEqual(copy_mock.call_count, 1)
+        self.assertEqual(run_mock.call_count, 0)
+        self.assertEqual(keyboard.events, [])
+
+    def test_auto_paste_system_shortcuts_fall_back_to_keyboard(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_is_text_input_focused", self._not_focused)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(
+                send_shortcut=lambda mod, key: False,
+                is_terminal_window_active=lambda: True,
+                paste_shortcuts=lambda terminal_active: (("ALT", "V"),)
+                if terminal_active
+                else (),
+                send_enter_via_accessibility=lambda: None,
+                is_text_input_focused=lambda: None,
+            ),
+        )
 
         with patch("vibemouse.output.pyperclip.copy") as copy_mock:
             route = subject.inject_or_clipboard("hello", auto_paste=True)
@@ -313,6 +424,31 @@ class TextOutputRoutingTests(unittest.TestCase):
             )
             self.assertFalse(probe())
 
+    def test_terminal_detection_prefers_system_integration(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(
+                send_shortcut=lambda mod, key: False,
+                is_terminal_window_active=lambda: True,
+                paste_shortcuts=lambda terminal_active: (),
+                send_enter_via_accessibility=lambda: None,
+                is_text_input_focused=lambda: None,
+            ),
+        )
+
+        with patch("vibemouse.output.subprocess.run") as run_mock:
+            probe = cast(
+                Callable[[], bool],
+                getattr(subject, "_is_hyprland_terminal_active"),
+            )
+            self.assertTrue(probe())
+
+        self.assertEqual(run_mock.call_count, 0)
+
     def test_auto_paste_failure_falls_back_to_clipboard(self) -> None:
         subject = self._make_subject()
         keyboard = _FakeKeyboardController()
@@ -375,6 +511,40 @@ class TextOutputRoutingTests(unittest.TestCase):
 
         subject.send_enter(mode="enter")
 
+        self.assertEqual(keyboard.events, [])
+
+    def test_send_enter_prefers_system_accessibility_when_available(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(send_enter_via_accessibility=lambda: True),
+        )
+
+        with patch("vibemouse.output.probe_send_enter_via_atspi") as probe_mock:
+            subject.send_enter(mode="enter")
+
+        self.assertEqual(probe_mock.call_count, 0)
+        self.assertEqual(keyboard.events, [])
+
+    def test_send_enter_falls_back_to_probe_when_integration_returns_none(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(send_enter_via_accessibility=lambda: None),
+        )
+
+        with patch(
+            "vibemouse.output.probe_send_enter_via_atspi", return_value=True
+        ) as probe_mock:
+            subject.send_enter(mode="enter")
+
+        self.assertEqual(probe_mock.call_count, 1)
         self.assertEqual(keyboard.events, [])
 
     def test_send_enter_prefers_hyprland_sendshortcut_when_available(self) -> None:

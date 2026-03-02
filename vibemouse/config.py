@@ -66,9 +66,20 @@ class AppConfig:
     merge_length_s: int
     fallback_to_cpu: bool
     button_debounce_ms: int
+    gestures_enabled: bool
+    gesture_trigger_button: str
+    gesture_threshold_px: int
+    gesture_freeze_pointer: bool
+    gesture_restore_cursor: bool
+    gesture_up_action: str
+    gesture_down_action: str
+    gesture_left_action: str
+    gesture_right_action: str
     enter_mode: str
     auto_paste: bool
     trust_remote_code: bool
+    prewarm_on_start: bool
+    status_file: Path
     front_button: str
     rear_button: str
     temp_dir: Path
@@ -77,6 +88,10 @@ class AppConfig:
 def load_config() -> AppConfig:
     temp_dir = Path(
         os.getenv("VIBEMOUSE_TEMP_DIR", str(Path(tempfile.gettempdir()) / "vibemouse"))
+    )
+    runtime_dir = Path(os.getenv("XDG_RUNTIME_DIR", tempfile.gettempdir()))
+    status_file = Path(
+        os.getenv("VIBEMOUSE_STATUS_FILE", str(runtime_dir / "vibemouse-status.json"))
     )
 
     sample_rate = _require_positive(
@@ -99,6 +114,45 @@ def load_config() -> AppConfig:
         "VIBEMOUSE_BUTTON_DEBOUNCE_MS",
         _read_int("VIBEMOUSE_BUTTON_DEBOUNCE_MS", 150),
     )
+    gestures_enabled = _read_bool("VIBEMOUSE_GESTURES_ENABLED", False)
+    gesture_trigger_button = _read_choice(
+        "VIBEMOUSE_GESTURE_TRIGGER_BUTTON",
+        "rear",
+        {"front", "rear", "right"},
+    )
+    gesture_threshold_px = _require_positive(
+        "VIBEMOUSE_GESTURE_THRESHOLD_PX",
+        _read_int("VIBEMOUSE_GESTURE_THRESHOLD_PX", 120),
+    )
+    gesture_freeze_pointer = _read_bool("VIBEMOUSE_GESTURE_FREEZE_POINTER", True)
+    gesture_restore_cursor = _read_bool("VIBEMOUSE_GESTURE_RESTORE_CURSOR", True)
+    gesture_actions = {
+        "record_toggle",
+        "send_enter",
+        "workspace_left",
+        "workspace_right",
+        "noop",
+    }
+    gesture_up_action = _read_choice(
+        "VIBEMOUSE_GESTURE_UP_ACTION",
+        "record_toggle",
+        gesture_actions,
+    )
+    gesture_down_action = _read_choice(
+        "VIBEMOUSE_GESTURE_DOWN_ACTION",
+        "noop",
+        gesture_actions,
+    )
+    gesture_left_action = _read_choice(
+        "VIBEMOUSE_GESTURE_LEFT_ACTION",
+        "noop",
+        gesture_actions,
+    )
+    gesture_right_action = _read_choice(
+        "VIBEMOUSE_GESTURE_RIGHT_ACTION",
+        "send_enter",
+        gesture_actions,
+    )
     enter_mode = _read_choice(
         "VIBEMOUSE_ENTER_MODE",
         "enter",
@@ -120,9 +174,20 @@ def load_config() -> AppConfig:
         merge_length_s=merge_length_s,
         fallback_to_cpu=_read_bool("VIBEMOUSE_FALLBACK_CPU", True),
         button_debounce_ms=button_debounce_ms,
+        gestures_enabled=gestures_enabled,
+        gesture_trigger_button=gesture_trigger_button,
+        gesture_threshold_px=gesture_threshold_px,
+        gesture_freeze_pointer=gesture_freeze_pointer,
+        gesture_restore_cursor=gesture_restore_cursor,
+        gesture_up_action=gesture_up_action,
+        gesture_down_action=gesture_down_action,
+        gesture_left_action=gesture_left_action,
+        gesture_right_action=gesture_right_action,
         enter_mode=enter_mode,
         auto_paste=_read_bool("VIBEMOUSE_AUTO_PASTE", False),
         trust_remote_code=_read_bool("VIBEMOUSE_TRUST_REMOTE_CODE", False),
+        prewarm_on_start=_read_bool("VIBEMOUSE_PREWARM_ON_START", True),
+        status_file=status_file,
         front_button=front_button,
         rear_button=rear_button,
         temp_dir=temp_dir,

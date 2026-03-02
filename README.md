@@ -112,9 +112,20 @@ Environment variables:
 | `VIBEMOUSE_DEVICE` | `cpu` | Preferred device (`cpu`, `cuda:0`, `npu:0`) |
 | `VIBEMOUSE_FALLBACK_CPU` | `true` | Fallback to CPU if preferred device fails |
 | `VIBEMOUSE_BUTTON_DEBOUNCE_MS` | `150` | Ignore repeated side-button presses within this window |
+| `VIBEMOUSE_GESTURES_ENABLED` | `false` | Enable side-button mouse gesture recognition |
+| `VIBEMOUSE_GESTURE_TRIGGER_BUTTON` | `rear` | Gesture trigger button (`front`, `rear`, or `right`) |
+| `VIBEMOUSE_GESTURE_THRESHOLD_PX` | `120` | Minimum movement required to treat input as gesture |
+| `VIBEMOUSE_GESTURE_FREEZE_POINTER` | `true` | Grab mouse device during gesture to prevent pointer drift |
+| `VIBEMOUSE_GESTURE_RESTORE_CURSOR` | `true` | Restore cursor position after recognized gesture action |
+| `VIBEMOUSE_GESTURE_UP_ACTION` | `record_toggle` | Action for `up` gesture: `record_toggle`, `send_enter`, `workspace_left`, `workspace_right`, `noop` |
+| `VIBEMOUSE_GESTURE_DOWN_ACTION` | `noop` | Action for `down` gesture: `record_toggle`, `send_enter`, `workspace_left`, `workspace_right`, `noop` |
+| `VIBEMOUSE_GESTURE_LEFT_ACTION` | `noop` | Action for `left` gesture: `record_toggle`, `send_enter`, `workspace_left`, `workspace_right`, `noop` |
+| `VIBEMOUSE_GESTURE_RIGHT_ACTION` | `send_enter` | Action for `right` gesture: `record_toggle`, `send_enter`, `workspace_left`, `workspace_right`, `noop` |
 | `VIBEMOUSE_ENTER_MODE` | `enter` | Rear button enter mode: `enter`, `ctrl_enter`, `shift_enter`, `none` |
 | `VIBEMOUSE_AUTO_PASTE` | `false` | Auto paste with Ctrl+V after copying fallback text |
 | `VIBEMOUSE_TRUST_REMOTE_CODE` | `false` | Set `true` only for trusted models that require remote code |
+| `VIBEMOUSE_PREWARM_ON_START` | `true` | Preload ASR backend at startup to reduce first-transcription latency |
+| `VIBEMOUSE_STATUS_FILE` | `$XDG_RUNTIME_DIR/vibemouse-status.json` | Runtime status file used by bar indicators |
 | `VIBEMOUSE_LANGUAGE` | `auto` | `auto`, `zh`, `en`, `yue`, `ja`, `ko` |
 | `VIBEMOUSE_USE_ITN` | `true` | Enable text normalization |
 | `VIBEMOUSE_ENABLE_VAD` | `true` | Enable VAD |
@@ -168,6 +179,61 @@ bind = , mouse:276, sendshortcut, , Return, activewindow
 export VIBEMOUSE_ENTER_MODE=none
 systemctl --user restart vibemouse.service
 hyprctl reload config-only
+```
+
+### Mouse gestures do not trigger actions
+
+Enable gestures and choose a trigger button first:
+
+```bash
+export VIBEMOUSE_GESTURES_ENABLED=true
+export VIBEMOUSE_GESTURE_TRIGGER_BUTTON=rear
+export VIBEMOUSE_GESTURE_THRESHOLD_PX=120
+systemctl --user restart vibemouse.service
+```
+
+Default gesture mapping is:
+
+- `up` -> toggle recording
+- `right` -> send Enter
+- `down` / `left` -> no-op
+
+You can remap each direction with `VIBEMOUSE_GESTURE_*_ACTION`.
+
+If pointer drift is still noticeable while holding the trigger button, keep
+`VIBEMOUSE_GESTURE_FREEZE_POINTER=true` (default). This grabs the mouse device
+during gesture capture on evdev-capable setups such as Hyprland + Arch.
+
+### Hyprland right-button workspace gestures
+
+If you want "hold right mouse button + swipe" to switch workspaces:
+
+```bash
+export VIBEMOUSE_GESTURES_ENABLED=true
+export VIBEMOUSE_GESTURE_TRIGGER_BUTTON=right
+export VIBEMOUSE_GESTURE_LEFT_ACTION=workspace_left
+export VIBEMOUSE_GESTURE_RIGHT_ACTION=workspace_right
+export VIBEMOUSE_GESTURE_THRESHOLD_PX=190
+export VIBEMOUSE_GESTURE_FREEZE_POINTER=false
+export VIBEMOUSE_GESTURE_RESTORE_CURSOR=true
+export VIBEMOUSE_GESTURE_UP_ACTION=noop
+export VIBEMOUSE_GESTURE_DOWN_ACTION=noop
+systemctl --user restart vibemouse.service
+```
+
+### First transcription is slow after startup or long idle
+
+Enable startup prewarm so the ASR backend loads before your first dictation:
+
+```bash
+export VIBEMOUSE_PREWARM_ON_START=true
+systemctl --user restart vibemouse.service
+```
+
+Then confirm prewarm with:
+
+```bash
+journalctl --user -u vibemouse.service -n 30 --no-pager | rg "prewarm"
 ```
 
 ### Recording works but recognition empty

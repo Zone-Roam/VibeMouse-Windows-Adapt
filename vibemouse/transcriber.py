@@ -22,6 +22,9 @@ class SenseVoiceTranscriber:
             raise RuntimeError("SenseVoice transcriber is not initialized")
         return self._transcriber.transcribe(audio_path)
 
+    def prewarm(self) -> None:
+        self._ensure_transcriber_loaded()
+
     def _ensure_transcriber_loaded(self) -> None:
         if self._transcriber is not None:
             return
@@ -183,6 +186,7 @@ class _FunASRBackend:
             "model": self._config.model_name,
             "trust_remote_code": self._config.trust_remote_code,
             "device": device,
+            "disable_update": True,
         }
         if self._config.enable_vad:
             kwargs["vad_model"] = "fsmn-vad"
