@@ -34,6 +34,13 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_route_mode, "always")
         self.assertFalse(config.openclaw_toggle_initial)
         self.assertEqual(config.openclaw_toggle_hotkey, "f8")
+        self.assertEqual(config.user_dictionary_file.name, "user_dictionary.json")
+        self.assertEqual(config.text_history_file.name, "transcript-history.jsonl")
+        self.assertTrue(config.text_history_enabled)
+        self.assertTrue(config.strip_emoji)
+        self.assertEqual(config.input_mode, "mouse")
+        self.assertEqual(config.front_hotkey, "<ctrl>+<alt>+<shift>+f9")
+        self.assertEqual(config.rear_hotkey, "<ctrl>+<alt>+<shift>+f10")
         self.assertEqual(config.front_button, "x1")
         self.assertEqual(config.rear_button, "x2")
 
@@ -230,6 +237,68 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_route_mode, "toggle")
         self.assertTrue(config.openclaw_toggle_initial)
         self.assertEqual(config.openclaw_toggle_hotkey, "f9")
+
+    def test_hotkey_mode_fields_can_be_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_INPUT_MODE": "hotkey",
+                "VIBEMOUSE_FRONT_HOTKEY": "<ctrl>+<alt>+<shift>+f11",
+                "VIBEMOUSE_REAR_HOTKEY": "<ctrl>+<alt>+<shift>+f12",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.input_mode, "hotkey")
+        self.assertEqual(config.front_hotkey, "<ctrl>+<alt>+<shift>+f11")
+        self.assertEqual(config.rear_hotkey, "<ctrl>+<alt>+<shift>+f12")
+
+    def test_invalid_input_mode_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_INPUT_MODE": "keyboard"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_INPUT_MODE must be one of",
+            ):
+                _ = load_config()
+
+    def test_hotkey_mode_rejects_same_front_and_rear_hotkeys(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_INPUT_MODE": "hotkey",
+                "VIBEMOUSE_FRONT_HOTKEY": "<ctrl>+<alt>+f9",
+                "VIBEMOUSE_REAR_HOTKEY": "  <CTRL> + <ALT> + F9 ",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_FRONT_HOTKEY and VIBEMOUSE_REAR_HOTKEY must differ",
+            ):
+                _ = load_config()
+
+    def test_text_postprocess_fields_can_be_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_USER_DICTIONARY_FILE": "/tmp/vm-dict.json",
+                "VIBEMOUSE_TEXT_HISTORY_FILE": "/tmp/vm-history.jsonl",
+                "VIBEMOUSE_TEXT_HISTORY_ENABLED": "false",
+                "VIBEMOUSE_STRIP_EMOJI": "false",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.user_dictionary_file.name, "vm-dict.json")
+        self.assertEqual(config.text_history_file.name, "vm-history.jsonl")
+        self.assertFalse(config.text_history_enabled)
+        self.assertFalse(config.strip_emoji)
 
     def test_invalid_openclaw_route_mode_is_rejected(self) -> None:
         with patch.dict(

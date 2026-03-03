@@ -56,15 +56,19 @@ def _check_config_load() -> tuple[DoctorCheck, AppConfig | None]:
             None,
         )
 
+    if config.input_mode == "hotkey":
+        input_detail = (
+            f"input_mode=hotkey, front_hotkey={config.front_hotkey}, "
+            + f"rear_hotkey={config.rear_hotkey}"
+        )
+    else:
+        input_detail = f"input_mode=mouse, front={config.front_button}, rear={config.rear_button}"
+
     return (
         DoctorCheck(
             name="config",
             status="ok",
-            detail=(
-                "loaded "
-                + f"front={config.front_button}, rear={config.rear_button}, "
-                + f"openclaw_agent={config.openclaw_agent or 'none'}"
-            ),
+            detail=input_detail + f", openclaw_agent={config.openclaw_agent or 'none'}",
         ),
         config,
     )

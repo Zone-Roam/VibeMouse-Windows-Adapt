@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -16,6 +17,11 @@ GestureCallback = Callable[[str], None]
 
 
 class SideButtonListener:
+    _WM_XBUTTONDOWN: int = 0x020B
+    _WM_XBUTTONUP: int = 0x020C
+    _XBUTTON1: int = 1
+    _XBUTTON2: int = 2
+
     def __init__(
         self,
         on_front_press: ButtonCallback,
@@ -208,15 +214,44 @@ class SideButtonListener:
             raise RuntimeError("pynput.mouse is not available") from error
 
         listener_ctor = cast(_MouseListenerCtor, getattr(mouse_module, "Listener"))
+        listener_holder: dict[str, _MouseListener] = {}
 
         button_map = {
-            "x1": {"x1", "x_button1", "button8"},
-            "x2": {"x2", "x_button2", "button9"},
+            "x1": {"x1", "x_button1", "button8", "button4", "back", "browser_back"},
+            "x2": {
+                "x2",
+                "x_button2",
+                "button9",
+                "button5",
+                "forward",
+                "browser_forward",
+            },
         }
 
         front_candidates = button_map[self._front_button]
         rear_candidates = button_map[self._rear_button]
         right_candidates = {"right", "button2"}
+        listener_kwargs: dict[str, object] = {}
+
+        if sys.platform.startswith("win"):
+            blocked_side_buttons = self._blocked_windows_side_buttons()
+
+            def win32_event_filter(msg: int, data: object) -> None:
+                if not self._should_suppress_windows_side_button(
+                    msg=msg,
+                    data=data,
+                    blocked_buttons=blocked_side_buttons,
+                ):
+                    return
+                listener = listener_holder.get("listener")
+                if listener is None:
+                    return
+                try:
+                    listener.suppress_event()
+                except Exception:
+                    return
+
+            listener_kwargs["win32_event_filter"] = win32_event_filter
 
         def on_click(x: int, y: int, button: object, pressed: bool) -> None:
             btn_name = str(button).lower().split(".")[-1]
@@ -227,10 +262,8 @@ class SideButtonListener:
                 button_label = "rear"
             elif btn_name in right_candidates:
                 button_label = "right"
-
             if button_label is None:
                 return
-
             if self._gestures_enabled and self._is_gesture_trigger_button(button_label):
                 if pressed:
                     self._start_gesture_capture(initial_position=(x, y))
@@ -246,13 +279,72 @@ class SideButtonListener:
                 return
             self._accumulate_gesture_position(x, y)
 
-        listener = listener_ctor(on_click=on_click, on_move=on_move)
+        listener = listener_ctor(on_click=on_click, on_move=on_move, **listener_kwargs)
+        listener_holder["listener"] = listener
         listener.start()
         try:
             while not self._stop.is_set():
                 time.sleep(0.2)
         finally:
             listener.stop()
+
+    def _suppress_windows_side_button(
+        self,
+        *,
+        listener_holder: dict[str, _MouseListener],
+        force: bool,
+    ) -> None:
+        if not force:
+            return
+        if not sys.platform.startswith("win"):
+            return
+
+        listener = listener_holder.get("listener")
+        if listener is None:
+            return
+        listener.suppress_event()
+
+    def _blocked_windows_side_buttons(self) -> set[int]:
+        code_map = {
+            "x1": self._XBUTTON1,
+            "x2": self._XBUTTON2,
+        }
+        return {
+            code_map[self._front_button],
+            code_map[self._rear_button],
+        }
+
+    def _should_suppress_windows_side_button(
+        self,
+        *,
+        msg: int,
+        data: object,
+        blocked_buttons: set[int] | None = None,
+    ) -> bool:
+        if msg not in {self._WM_XBUTTONDOWN, self._WM_XBUTTONUP}:
+            return False
+
+        xbutton = self._extract_windows_xbutton(data)
+        if xbutton is None:
+            return False
+
+        blocked = (
+            blocked_buttons
+            if blocked_buttons is not None
+            else self._blocked_windows_side_buttons()
+        )
+        return xbutton in blocked
+
+    @staticmethod
+    def _extract_windows_xbutton(data: object) -> int | None:
+        mouse_data = getattr(data, "mouseData", None)
+        if mouse_data is None:
+            return None
+        try:
+            raw_value = int(mouse_data)
+        except (TypeError, ValueError):
+            return None
+        return raw_value >> 16
 
     def _dispatch_click(self, button_label: str) -> None:
         if button_label == "front":
@@ -501,6 +593,8 @@ class _MouseListener(Protocol):
 
     def stop(self) -> None: ...
 
+    def suppress_event(self) -> None: ...
+
 
 class _MouseListenerCtor(Protocol):
     def __call__(
@@ -508,4 +602,5 @@ class _MouseListenerCtor(Protocol):
         *,
         on_click: Callable[[int, int, object, bool], None],
         on_move: Callable[[int, int], None] | None = None,
+        **kwargs: object,
     ) -> _MouseListener: ...

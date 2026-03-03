@@ -77,20 +77,23 @@ class VibeMouseGui:
         env = dict(os.environ)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        env["VIBEMOUSE_BACKEND"] = "funasr_onnx"
-        env["VIBEMOUSE_MODEL"] = "iic/SenseVoiceSmall"
-        env["VIBEMOUSE_DEVICE"] = "cpu"
-        env["VIBEMOUSE_LANGUAGE"] = "auto"
-        env["VIBEMOUSE_USE_ITN"] = "true"
-        env["VIBEMOUSE_AUTO_PASTE"] = "true"
-        env["VIBEMOUSE_FRONT_BUTTON"] = "x2"
-        env["VIBEMOUSE_REAR_BUTTON"] = "x1"
-        env["PYTHONUNBUFFERED"] = "1"
+        env.setdefault("VIBEMOUSE_BACKEND", "funasr_onnx")
+        env.setdefault("VIBEMOUSE_MODEL", "iic/SenseVoiceSmall")
+        env.setdefault("VIBEMOUSE_DEVICE", "cpu")
+        env.setdefault("VIBEMOUSE_LANGUAGE", "auto")
+        env.setdefault("VIBEMOUSE_USE_ITN", "true")
+        env.setdefault("VIBEMOUSE_AUTO_PASTE", "true")
+        env.setdefault("VIBEMOUSE_INPUT_MODE", "mouse")
+        env.setdefault("VIBEMOUSE_FRONT_BUTTON", "x2")
+        env.setdefault("VIBEMOUSE_REAR_BUTTON", "x1")
+        env.setdefault("VIBEMOUSE_FRONT_HOTKEY", "<ctrl>+<alt>+<shift>+f9")
+        env.setdefault("VIBEMOUSE_REAR_HOTKEY", "<ctrl>+<alt>+<shift>+f10")
+        env.setdefault("PYTHONUNBUFFERED", "1")
 
-        env["VIBEMOUSE_OPENCLAW_ROUTE_MODE"] = "toggle"
-        env["VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL"] = "false"
-        env["VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY"] = "f8"
-        env["VIBEMOUSE_OPENCLAW_COMMAND"] = "wsl -d Ubuntu -- openclaw"
+        env.setdefault("VIBEMOUSE_OPENCLAW_ROUTE_MODE", "toggle")
+        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", "false")
+        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8")
+        env.setdefault("VIBEMOUSE_OPENCLAW_COMMAND", "wsl -d Ubuntu -- openclaw")
 
         env["VIBEMOUSE_STATUS_FILE"] = str(self.status_file)
         return env
@@ -107,6 +110,7 @@ class VibeMouseGui:
 
         env = self.build_env()
         self.log("[INFO] Starting VibeMouse process...")
+        self.log("[INFO] Initializing model/transcriber, first start may take 1-3 minutes.")
         self.process = subprocess.Popen(
             [str(self.venv_python), "-u", "-m", "vibemouse.main", "run"],
             cwd=str(self.project_root),

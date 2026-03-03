@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import unittest
 from collections.abc import Callable
 from typing import cast
@@ -151,3 +152,121 @@ class SideButtonListenerGestureTests(unittest.TestCase):
             finish_capture("right")
 
         self.assertEqual(restore_mock.call_count, 0)
+
+    def test_windows_side_button_suppression_for_xbutton_messages(self) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x2",
+            rear_button="x1",
+        )
+        blocked = cast(
+            Callable[[], set[int]],
+            getattr(listener, "_blocked_windows_side_buttons"),
+        )()
+
+        should_suppress = cast(
+            Callable[..., bool],
+            getattr(listener, "_should_suppress_windows_side_button"),
+        )
+
+        self.assertTrue(
+            should_suppress(
+                msg=0x020B,
+                data=SimpleNamespace(mouseData=(1 << 16)),
+                blocked_buttons=blocked,
+            )
+        )
+        self.assertTrue(
+            should_suppress(
+                msg=0x020C,
+                data=SimpleNamespace(mouseData=(2 << 16)),
+                blocked_buttons=blocked,
+            )
+        )
+        self.assertFalse(
+            should_suppress(
+                msg=0x0200,
+                data=SimpleNamespace(mouseData=(1 << 16)),
+                blocked_buttons=blocked,
+            )
+        )
+
+    def test_extract_windows_xbutton_handles_invalid_payload(self) -> None:
+        extractor = cast(
+            Callable[[object], int | None],
+            getattr(SideButtonListener, "_extract_windows_xbutton"),
+        )
+        self.assertIsNone(extractor(SimpleNamespace()))
+        self.assertIsNone(extractor(SimpleNamespace(mouseData="bad")))
+
+    def test_suppress_windows_side_button_calls_listener_suppress_event(self) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x2",
+            rear_button="x1",
+        )
+        called: list[str] = []
+        listener_holder = {
+            "listener": SimpleNamespace(
+                suppress_event=lambda: called.append("suppressed")
+            )
+        }
+        suppress_side_button = cast(
+            Callable[..., None],
+            getattr(listener, "_suppress_windows_side_button"),
+        )
+
+        with patch("vibemouse.mouse_listener.sys.platform", "win32"):
+            suppress_side_button(
+                listener_holder=listener_holder,
+                force=True,
+            )
+
+        self.assertEqual(called, ["suppressed"])
+
+    def test_run_pynput_installs_win32_event_filter_for_side_buttons(self) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x2",
+            rear_button="x1",
+        )
+        run_pynput = cast(Callable[[], None], getattr(listener, "_run_pynput"))
+
+        captured_kwargs: dict[str, object] = {}
+        suppressed: list[str] = []
+
+        class FakeListener:
+            def start(self) -> None:
+                filter_fn = cast(
+                    Callable[[int, object], None],
+                    captured_kwargs["win32_event_filter"],
+                )
+                filter_fn(0x020B, SimpleNamespace(mouseData=(1 << 16)))
+                filter_fn(0x0200, SimpleNamespace(mouseData=(1 << 16)))
+                listener._stop.set()
+
+            def stop(self) -> None:
+                return
+
+            def suppress_event(self) -> None:
+                suppressed.append("suppressed")
+
+        def fake_listener_ctor(**kwargs: object) -> FakeListener:
+            captured_kwargs.update(kwargs)
+            return FakeListener()
+
+        fake_mouse_module = SimpleNamespace(Listener=fake_listener_ctor)
+        with (
+            patch("vibemouse.mouse_listener.sys.platform", "win32"),
+            patch(
+                "vibemouse.mouse_listener.importlib.import_module",
+                return_value=fake_mouse_module,
+            ),
+        ):
+            run_pynput()
+
+        self.assertIn("win32_event_filter", captured_kwargs)
+        self.assertEqual(suppressed, ["suppressed"])

@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, cast
 
 import pyperclip
@@ -18,6 +19,7 @@ from vibemouse.system_integration import (
     probe_text_input_focus_via_atspi,
     probe_send_enter_via_atspi,
 )
+from vibemouse.text_postprocess import UserTextProcessor
 
 
 class TextOutput:
@@ -29,6 +31,10 @@ class TextOutput:
         openclaw_agent: str | None = None,
         openclaw_timeout_s: float = 20.0,
         openclaw_retries: int = 0,
+        user_dictionary_file: Path | None = None,
+        text_history_file: Path | None = None,
+        text_history_enabled: bool = True,
+        strip_emoji: bool = True,
     ) -> None:
         try:
             keyboard_module = importlib.import_module("pynput.keyboard")
@@ -60,6 +66,14 @@ class TextOutput:
         self._openclaw_agent: str | None = openclaw_agent
         self._openclaw_timeout_s: float = max(0.5, openclaw_timeout_s)
         self._openclaw_retries: int = max(0, int(openclaw_retries))
+        self._text_processor: UserTextProcessor | None = None
+        if user_dictionary_file is not None and text_history_file is not None:
+            self._text_processor = UserTextProcessor(
+                dictionary_file=user_dictionary_file,
+                history_file=text_history_file,
+                history_enabled=text_history_enabled,
+                strip_emoji=strip_emoji,
+            )
 
     def send_enter(self, *, mode: str = "enter") -> None:
         normalized = mode.strip().lower()
@@ -81,7 +95,7 @@ class TextOutput:
         raise ValueError(f"Unsupported enter mode: {mode!r}")
 
     def inject_or_clipboard(self, text: str, *, auto_paste: bool = False) -> str:
-        normalized = text.strip()
+        normalized = self._prepare_text(text)
         if not normalized:
             return "empty"
 
@@ -102,7 +116,7 @@ class TextOutput:
         return self.send_to_openclaw_result(text).route
 
     def send_to_openclaw_result(self, text: str) -> "OpenClawDispatchResult":
-        normalized = text.strip()
+        normalized = self._prepare_text(text)
         if not normalized:
             return OpenClawDispatchResult(route="empty", reason="empty_text")
 
@@ -329,6 +343,15 @@ class TextOutput:
                 return focused
 
         return probe_text_input_focus_via_atspi()
+
+    def _prepare_text(self, text: str) -> str:
+        processor = getattr(self, "_text_processor", None)
+        if processor is None:
+            return text.strip()
+        try:
+            return processor.process(text)
+        except Exception:
+            return text.strip()
 
 
 class _KeyboardController(Protocol):

@@ -296,6 +296,28 @@ class TextOutputRoutingTests(unittest.TestCase):
         self.assertEqual(copied, ["hello"])
         self.assertEqual(keyboard.events, [])
 
+    def test_inject_uses_text_processor_when_configured(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_is_text_input_focused", self._not_focused)
+        setattr(
+            subject,
+            "_text_processor",
+            SimpleNamespace(process=lambda text: "Telegram"),
+        )
+
+        copied: list[str] = []
+
+        def fake_copy(text: str) -> None:
+            copied.append(text)
+
+        with patch("vibemouse.output.pyperclip.copy", side_effect=fake_copy):
+            route = subject.inject_or_clipboard("telegarm 😄", auto_paste=False)
+
+        self.assertEqual(route, "clipboard")
+        self.assertEqual(copied, ["Telegram"])
+
     def test_auto_paste_route_uses_ctrl_v(self) -> None:
         subject = self._make_subject()
         keyboard = _FakeKeyboardController()

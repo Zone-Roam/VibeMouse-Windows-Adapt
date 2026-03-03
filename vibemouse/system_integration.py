@@ -126,9 +126,16 @@ class WindowsSystemIntegration(NoopSystemIntegration):
         *,
         keyboard_controller: object | None = None,
         key_holder: object | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> None:
         self._keyboard_controller: object | None = keyboard_controller
         self._key_holder: object | None = key_holder
+        source_env = env if env is not None else os.environ
+        self._cursor_terminal_mode: bool = _read_bool_from_env(
+            source_env,
+            "VIBEMOUSE_WINDOWS_CURSOR_TERMINAL_MODE",
+            False,
+        )
 
     def send_shortcut(self, *, mod: str, key: str) -> bool:
         keyboard, key_holder = self._ensure_keyboard_objects()
@@ -168,16 +175,32 @@ class WindowsSystemIntegration(NoopSystemIntegration):
         payload = self.active_window()
         if payload is None:
             return False
-        return is_terminal_window_payload(payload)
+        if is_terminal_window_payload(payload):
+            return True
+        if self._cursor_terminal_mode and self._is_cursor_window_payload(payload):
+            return True
+        return False
 
     def paste_shortcuts(self, *, terminal_active: bool) -> tuple[tuple[str, str], ...]:
         if terminal_active:
             return (
-                ("CTRL SHIFT", "V"),
                 ("SHIFT", "Insert"),
+                ("CTRL SHIFT", "V"),
                 ("CTRL", "V"),
             )
         return (("CTRL", "V"),)
+
+    @staticmethod
+    def _is_cursor_window_payload(payload: Mapping[str, object]) -> bool:
+        process_name = str(payload.get("process", "")).lower()
+        window_class = str(payload.get("class", "")).lower()
+        title = str(payload.get("title", "")).lower()
+
+        if process_name in {"cursor.exe", "cursor"}:
+            return True
+        if "cursor" in window_class:
+            return True
+        return "cursor" in title
 
     def _ensure_keyboard_objects(self) -> tuple[object | None, object | None]:
         if self._keyboard_controller is not None and self._key_holder is not None:
@@ -460,7 +483,7 @@ def create_system_integration(
         (platform_name if platform_name is not None else sys.platform).strip().lower()
     )
     if normalized_platform.startswith("win"):
-        return WindowsSystemIntegration()
+        return WindowsSystemIntegration(env=env)
     if normalized_platform == "darwin":
         return MacOSSystemIntegration()
 
@@ -570,3 +593,14 @@ def _load_windows_kernel32() -> object | None:
         return cast(object, ctypes.windll.kernel32)
     except Exception:
         return None
+
+
+def _read_bool_from_env(
+    env: Mapping[str, str],
+    name: str,
+    default: bool,
+) -> bool:
+    raw = env.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

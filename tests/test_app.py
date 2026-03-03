@@ -349,3 +349,73 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
         on_rear()
 
         self.assertEqual(worker_calls, [(recording, "openclaw")])
+
+
+class VoiceMouseAppInitTests(unittest.TestCase):
+    @staticmethod
+    def _make_config(input_mode: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            sample_rate=16000,
+            channels=1,
+            dtype="float32",
+            model_name="iic/SenseVoiceSmall",
+            device="cpu",
+            transcriber_backend="funasr_onnx",
+            auto_paste=True,
+            enter_mode="enter",
+            button_debounce_ms=150,
+            gestures_enabled=False,
+            gesture_trigger_button="rear",
+            gesture_threshold_px=120,
+            gesture_freeze_pointer=True,
+            gesture_restore_cursor=True,
+            prewarm_on_start=False,
+            openclaw_command="openclaw",
+            openclaw_agent="main",
+            openclaw_timeout_s=20.0,
+            openclaw_retries=0,
+            openclaw_route_mode="toggle",
+            openclaw_toggle_initial=False,
+            openclaw_toggle_hotkey="f8",
+            user_dictionary_file=Path("D:/tmp/user_dictionary.json"),
+            text_history_file=Path("D:/tmp/transcript-history.jsonl"),
+            text_history_enabled=True,
+            strip_emoji=True,
+            front_button="x2",
+            rear_button="x1",
+            front_hotkey="<ctrl>+<alt>+<shift>+f9",
+            rear_hotkey="<ctrl>+<alt>+<shift>+f10",
+            input_mode=input_mode,
+            status_file=Path("D:/tmp/vibemouse-status.json"),
+            temp_dir=Path("D:/tmp"),
+        )
+
+    def test_init_uses_mouse_listener_when_input_mode_mouse(self) -> None:
+        config = self._make_config("mouse")
+        with (
+            patch("vibemouse.app.create_system_integration"),
+            patch("vibemouse.app.AudioRecorder"),
+            patch("vibemouse.app.SenseVoiceTranscriber"),
+            patch("vibemouse.app.TextOutput"),
+            patch("vibemouse.app.SideButtonListener") as side_listener,
+            patch("vibemouse.app.HotkeyListener") as hotkey_listener,
+        ):
+            _ = VoiceMouseApp(config)
+
+        self.assertEqual(side_listener.call_count, 1)
+        self.assertEqual(hotkey_listener.call_count, 0)
+
+    def test_init_uses_hotkey_listener_when_input_mode_hotkey(self) -> None:
+        config = self._make_config("hotkey")
+        with (
+            patch("vibemouse.app.create_system_integration"),
+            patch("vibemouse.app.AudioRecorder"),
+            patch("vibemouse.app.SenseVoiceTranscriber"),
+            patch("vibemouse.app.TextOutput"),
+            patch("vibemouse.app.SideButtonListener") as side_listener,
+            patch("vibemouse.app.HotkeyListener") as hotkey_listener,
+        ):
+            _ = VoiceMouseApp(config)
+
+        self.assertEqual(side_listener.call_count, 0)
+        self.assertEqual(hotkey_listener.call_count, 1)

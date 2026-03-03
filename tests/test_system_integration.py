@@ -139,12 +139,44 @@ class HyprlandSystemIntegrationTests(unittest.TestCase):
         integration = WindowsSystemIntegration()
         self.assertEqual(
             integration.paste_shortcuts(terminal_active=True),
-            (("CTRL SHIFT", "V"), ("SHIFT", "Insert"), ("CTRL", "V")),
+            (("SHIFT", "Insert"), ("CTRL SHIFT", "V"), ("CTRL", "V")),
         )
         self.assertEqual(
             integration.paste_shortcuts(terminal_active=False),
             (("CTRL", "V"),),
         )
+
+    def test_windows_terminal_active_detection_supports_cursor_mode(self) -> None:
+        integration = WindowsSystemIntegration(
+            env={"VIBEMOUSE_WINDOWS_CURSOR_TERMINAL_MODE": "true"},
+        )
+        with patch.object(
+            integration,
+            "active_window",
+            return_value={
+                "class": "Chrome_WidgetWin_1",
+                "initialClass": "Chrome_WidgetWin_1",
+                "title": "my-project - Cursor",
+                "process": "cursor.exe",
+            },
+        ):
+            self.assertTrue(integration.is_terminal_window_active())
+
+    def test_windows_terminal_active_detection_cursor_mode_disabled(self) -> None:
+        integration = WindowsSystemIntegration(
+            env={"VIBEMOUSE_WINDOWS_CURSOR_TERMINAL_MODE": "false"},
+        )
+        with patch.object(
+            integration,
+            "active_window",
+            return_value={
+                "class": "Chrome_WidgetWin_1",
+                "initialClass": "Chrome_WidgetWin_1",
+                "title": "my-project - Cursor",
+                "process": "cursor.exe",
+            },
+        ):
+            self.assertFalse(integration.is_terminal_window_active())
 
     def test_windows_send_shortcut_dispatches_keyboard_sequence(self) -> None:
         events: list[tuple[str, object]] = []

@@ -40,6 +40,17 @@ def _read_button(name: str, default: str) -> str:
     return value
 
 
+def _read_hotkey(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip()
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    return value
+
+
+def _canonical_hotkey(value: str) -> str:
+    return "".join(value.strip().lower().split())
+
+
 def _require_positive(name: str, value: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer, got {value}")
@@ -103,6 +114,13 @@ class AppConfig:
     openclaw_route_mode: str
     openclaw_toggle_initial: bool
     openclaw_toggle_hotkey: str
+    user_dictionary_file: Path
+    text_history_file: Path
+    text_history_enabled: bool
+    strip_emoji: bool
+    input_mode: str
+    front_hotkey: str
+    rear_hotkey: str
     front_button: str
     rear_button: str
     temp_dir: Path
@@ -129,10 +147,26 @@ def load_config() -> AppConfig:
     merge_length_s = _require_positive(
         "VIBEMOUSE_MERGE_LENGTH_S", _read_int("VIBEMOUSE_MERGE_LENGTH_S", 15)
     )
+    input_mode = _read_choice(
+        "VIBEMOUSE_INPUT_MODE",
+        "mouse",
+        {"mouse", "hotkey"},
+    )
     front_button = _read_button("VIBEMOUSE_FRONT_BUTTON", "x1")
     rear_button = _read_button("VIBEMOUSE_REAR_BUTTON", "x2")
     if front_button == rear_button:
         raise ValueError("VIBEMOUSE_FRONT_BUTTON and VIBEMOUSE_REAR_BUTTON must differ")
+    front_hotkey = _read_hotkey(
+        "VIBEMOUSE_FRONT_HOTKEY",
+        "<ctrl>+<alt>+<shift>+f9",
+    )
+    rear_hotkey = _read_hotkey(
+        "VIBEMOUSE_REAR_HOTKEY",
+        "<ctrl>+<alt>+<shift>+f10",
+    )
+    if input_mode == "hotkey":
+        if _canonical_hotkey(front_hotkey) == _canonical_hotkey(rear_hotkey):
+            raise ValueError("VIBEMOUSE_FRONT_HOTKEY and VIBEMOUSE_REAR_HOTKEY must differ")
     button_debounce_ms = _require_non_negative(
         "VIBEMOUSE_BUTTON_DEBOUNCE_MS",
         _read_int("VIBEMOUSE_BUTTON_DEBOUNCE_MS", 150),
@@ -201,6 +235,20 @@ def load_config() -> AppConfig:
     )
     openclaw_toggle_initial = _read_bool("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", False)
     openclaw_toggle_hotkey = os.getenv("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8").strip()
+    user_dictionary_file = Path(
+        os.getenv(
+            "VIBEMOUSE_USER_DICTIONARY_FILE",
+            str(status_file.parent / "user_dictionary.json"),
+        )
+    )
+    text_history_file = Path(
+        os.getenv(
+            "VIBEMOUSE_TEXT_HISTORY_FILE",
+            str(status_file.parent / "transcript-history.jsonl"),
+        )
+    )
+    text_history_enabled = _read_bool("VIBEMOUSE_TEXT_HISTORY_ENABLED", True)
+    strip_emoji = _read_bool("VIBEMOUSE_STRIP_EMOJI", True)
 
     return AppConfig(
         sample_rate=sample_rate,
@@ -238,6 +286,13 @@ def load_config() -> AppConfig:
         openclaw_route_mode=openclaw_route_mode,
         openclaw_toggle_initial=openclaw_toggle_initial,
         openclaw_toggle_hotkey=openclaw_toggle_hotkey,
+        user_dictionary_file=user_dictionary_file,
+        text_history_file=text_history_file,
+        text_history_enabled=text_history_enabled,
+        strip_emoji=strip_emoji,
+        input_mode=input_mode,
+        front_hotkey=front_hotkey,
+        rear_hotkey=rear_hotkey,
         front_button=front_button,
         rear_button=rear_button,
         temp_dir=temp_dir,

@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 import pystray
 
 
-State = Literal["stopped", "idle", "recording"]
+State = Literal["stopped", "starting", "idle", "recording"]
 
 
 class VibeMouseTrayApp:
@@ -29,6 +29,8 @@ class VibeMouseTrayApp:
         self.reader_thread: threading.Thread | None = None
         self.monitor_thread: threading.Thread | None = None
         self.running = True
+        self.starting_until_monotonic = 0.0
+        self.startup_grace_s = 90.0
 
         self.openclaw_route_enabled = False
         self.recording = False
@@ -66,20 +68,23 @@ class VibeMouseTrayApp:
         env = dict(os.environ)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        env["VIBEMOUSE_BACKEND"] = "funasr_onnx"
-        env["VIBEMOUSE_MODEL"] = "iic/SenseVoiceSmall"
-        env["VIBEMOUSE_DEVICE"] = "cpu"
-        env["VIBEMOUSE_LANGUAGE"] = "auto"
-        env["VIBEMOUSE_USE_ITN"] = "true"
-        env["VIBEMOUSE_AUTO_PASTE"] = "true"
-        env["VIBEMOUSE_FRONT_BUTTON"] = "x2"
-        env["VIBEMOUSE_REAR_BUTTON"] = "x1"
-        env["VIBEMOUSE_OPENCLAW_ROUTE_MODE"] = "toggle"
-        env["VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL"] = "false"
-        env["VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY"] = "f8"
-        env["VIBEMOUSE_OPENCLAW_COMMAND"] = "wsl -d Ubuntu -- openclaw"
-        env["VIBEMOUSE_STATUS_FILE"] = str(self.status_file)
-        env["PYTHONUNBUFFERED"] = "1"
+        env.setdefault("VIBEMOUSE_BACKEND", "funasr_onnx")
+        env.setdefault("VIBEMOUSE_MODEL", "iic/SenseVoiceSmall")
+        env.setdefault("VIBEMOUSE_DEVICE", "cpu")
+        env.setdefault("VIBEMOUSE_LANGUAGE", "auto")
+        env.setdefault("VIBEMOUSE_USE_ITN", "true")
+        env.setdefault("VIBEMOUSE_AUTO_PASTE", "true")
+        env.setdefault("VIBEMOUSE_INPUT_MODE", "mouse")
+        env.setdefault("VIBEMOUSE_FRONT_BUTTON", "x2")
+        env.setdefault("VIBEMOUSE_REAR_BUTTON", "x1")
+        env.setdefault("VIBEMOUSE_FRONT_HOTKEY", "<ctrl>+<alt>+<shift>+f9")
+        env.setdefault("VIBEMOUSE_REAR_HOTKEY", "<ctrl>+<alt>+<shift>+f10")
+        env.setdefault("VIBEMOUSE_OPENCLAW_ROUTE_MODE", "toggle")
+        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", "false")
+        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8")
+        env.setdefault("VIBEMOUSE_OPENCLAW_COMMAND", "wsl -d Ubuntu -- openclaw")
+        env.setdefault("VIBEMOUSE_STATUS_FILE", str(self.status_file))
+        env.setdefault("PYTHONUNBUFFERED", "1")
         return env
 
     def run(self) -> int:
@@ -118,7 +123,11 @@ class VibeMouseTrayApp:
 
         env = self.build_env()
         self.openclaw_route_enabled = False
+        self.starting_until_monotonic = time.monotonic() + self.startup_grace_s
         self._append_log("[INFO] Starting VibeMouse process...")
+        self._append_log(
+            "[INFO] Initializing model/transcriber, first start may take 1-3 minutes."
+        )
         creationflags = 0
         if os.name == "nt":
             creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -143,7 +152,7 @@ class VibeMouseTrayApp:
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.reader_thread.start()
         self._refresh_visual_state(force=True)
-        self.icon.notify("VibeMouse started. Use side buttons to record.")
+        self.icon.notify("VibeMouse starting. First cold start may take 1-3 minutes.")
 
     def stop_service(self) -> None:
         proc = self.process
@@ -160,6 +169,7 @@ class VibeMouseTrayApp:
                 pass
         self.process = None
         self.recording = False
+        self.starting_until_monotonic = 0.0
         self._refresh_visual_state(force=True)
 
     def _reader_loop(self) -> None:
@@ -193,6 +203,10 @@ class VibeMouseTrayApp:
                 self.openclaw_route_enabled = True
             elif "openclaw_route=false" in lower:
                 self.openclaw_route_enabled = False
+            elif "vibemouse ready." in lower:
+                self.starting_until_monotonic = 0.0
+            elif "transcriber prewarm complete" in lower:
+                self.starting_until_monotonic = 0.0
 
     def _read_recording_state(self) -> bool:
         if not self.status_file.exists():
@@ -210,6 +224,8 @@ class VibeMouseTrayApp:
         self.recording = self._read_recording_state()
         if self.process is None:
             self.state = "stopped"
+        elif time.monotonic() < self.starting_until_monotonic and not self.recording:
+            self.state = "starting"
         elif self.recording:
             self.state = "recording"
         else:
@@ -225,6 +241,8 @@ class VibeMouseTrayApp:
     def _status_text(self) -> str:
         if self.state == "stopped":
             return "Status: stopped"
+        if self.state == "starting":
+            return "Status: starting (warming up...)"
         if self.state == "recording":
             return "Status: recording"
         return "Status: idle"
@@ -237,6 +255,8 @@ class VibeMouseTrayApp:
     def _render_icon(state: State) -> Image.Image:
         if state == "recording":
             color = (220, 53, 69, 255)
+        elif state == "starting":
+            color = (255, 193, 7, 255)
         elif state == "idle":
             color = (40, 167, 69, 255)
         else:

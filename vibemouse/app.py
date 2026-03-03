@@ -9,6 +9,7 @@ from typing import Literal, Protocol
 
 from vibemouse.audio import AudioRecorder, AudioRecording
 from vibemouse.config import AppConfig
+from vibemouse.hotkey_listener import HotkeyListener
 from vibemouse.mouse_listener import SideButtonListener
 from vibemouse.output import TextOutput
 from vibemouse.system_integration import SystemIntegration, create_system_integration
@@ -38,21 +39,12 @@ class VoiceMouseApp:
             openclaw_agent=config.openclaw_agent,
             openclaw_timeout_s=config.openclaw_timeout_s,
             openclaw_retries=config.openclaw_retries,
+            user_dictionary_file=config.user_dictionary_file,
+            text_history_file=config.text_history_file,
+            text_history_enabled=config.text_history_enabled,
+            strip_emoji=config.strip_emoji,
         )
-        self._listener: SideButtonListener = SideButtonListener(
-            on_front_press=self._on_front_press,
-            on_rear_press=self._on_rear_press,
-            on_gesture=self._on_gesture,
-            front_button=config.front_button,
-            rear_button=config.rear_button,
-            debounce_s=config.button_debounce_ms / 1000.0,
-            gestures_enabled=config.gestures_enabled,
-            gesture_trigger_button=config.gesture_trigger_button,
-            gesture_threshold_px=config.gesture_threshold_px,
-            gesture_freeze_pointer=config.gesture_freeze_pointer,
-            gesture_restore_cursor=config.gesture_restore_cursor,
-            system_integration=self._system_integration,
-        )
+        self._listener: _InputListener = self._create_input_listener()
         self._stop_event: threading.Event = threading.Event()
         self._transcribe_lock: threading.Lock = threading.Lock()
         self._workers_lock: threading.Lock = threading.Lock()
@@ -79,6 +71,7 @@ class VoiceMouseApp:
             + f"Model={self._config.model_name}, preferred_device={self._config.device}, "
             + f"backend={self._config.transcriber_backend}, auto_paste={self._config.auto_paste}, "
             + f"enter_mode={self._config.enter_mode}, debounce_ms={self._config.button_debounce_ms}, "
+            + f"input_mode={self._config.input_mode}, "
             + f"front_button={self._config.front_button}, rear_button={self._config.rear_button}, "
             + f"gestures_enabled={self._config.gestures_enabled}, "
             + f"gesture_trigger={self._config.gesture_trigger_button}, "
@@ -86,7 +79,7 @@ class VoiceMouseApp:
             + f"gesture_freeze_pointer={self._config.gesture_freeze_pointer}, "
             + f"gesture_restore_cursor={self._config.gesture_restore_cursor}, "
             + f"prewarm_on_start={self._config.prewarm_on_start}, {route_detail}. "
-            + "Press side-front to start/stop recording. Side-rear while idle sends Enter."
+            + self._controls_hint()
         )
         self._maybe_prewarm_transcriber()
         try:
@@ -445,8 +438,47 @@ class VoiceMouseApp:
             return key_text.split(".", 1)[1]
         return key_text
 
+    def _create_input_listener(self) -> _InputListener:
+        config = self._config
+        if config.input_mode == "hotkey":
+            return HotkeyListener(
+                on_front_press=self._on_front_press,
+                on_rear_press=self._on_rear_press,
+                front_hotkey=config.front_hotkey,
+                rear_hotkey=config.rear_hotkey,
+                debounce_s=config.button_debounce_ms / 1000.0,
+            )
+        return SideButtonListener(
+            on_front_press=self._on_front_press,
+            on_rear_press=self._on_rear_press,
+            on_gesture=self._on_gesture,
+            front_button=config.front_button,
+            rear_button=config.rear_button,
+            debounce_s=config.button_debounce_ms / 1000.0,
+            gestures_enabled=config.gestures_enabled,
+            gesture_trigger_button=config.gesture_trigger_button,
+            gesture_threshold_px=config.gesture_threshold_px,
+            gesture_freeze_pointer=config.gesture_freeze_pointer,
+            gesture_restore_cursor=config.gesture_restore_cursor,
+            system_integration=self._system_integration,
+        )
+
+    def _controls_hint(self) -> str:
+        if self._config.input_mode == "hotkey":
+            return (
+                f"Front hotkey={self._config.front_hotkey}, "
+                + f"rear hotkey={self._config.rear_hotkey}."
+            )
+        return "Press side-front to start/stop recording. Side-rear while idle sends Enter."
+
 
 class _ToggleListener(Protocol):
+    def start(self) -> None: ...
+    def stop(self) -> None:
+        ...
+
+
+class _InputListener(Protocol):
     def start(self) -> None: ...
     def stop(self) -> None:
         ...
