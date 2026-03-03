@@ -50,6 +50,8 @@ class VoiceMouseApp:
         self._workers_lock: threading.Lock = threading.Lock()
         self._workers: set[threading.Thread] = set()
         self._prewarm_started: bool = False
+        self._meter_stop_event: threading.Event = threading.Event()
+        self._meter_thread: threading.Thread | None = None
         self._openclaw_route_lock: threading.Lock = threading.Lock()
         self._openclaw_toggle_listener: _ToggleListener | None = None
         self._openclaw_route_enabled: bool = self._initial_openclaw_route_enabled()
@@ -90,6 +92,7 @@ class VoiceMouseApp:
             self.shutdown()
 
     def shutdown(self) -> None:
+        self._stop_meter_updates()
         self._listener.stop()
         self._stop_openclaw_toggle_listener()
         self._recorder.cancel()
@@ -111,6 +114,7 @@ class VoiceMouseApp:
             try:
                 self._recorder.start()
                 self._set_recording_status(True)
+                self._start_meter_updates()
                 print("Recording started")
             except Exception as error:
                 self._set_recording_status(False)
@@ -232,6 +236,7 @@ class VoiceMouseApp:
         return proc.returncode == 0 and proc.stdout.strip() == "ok"
 
     def _stop_recording(self) -> AudioRecording | None:
+        self._stop_meter_updates()
         try:
             recording = self._recorder.stop_and_save()
         except Exception as error:
@@ -343,10 +348,12 @@ class VoiceMouseApp:
         except Exception as error:
             print(f"Transcriber prewarm skipped: {error}")
 
-    def _set_recording_status(self, is_recording: bool) -> None:
+    def _set_recording_status(self, is_recording: bool, *, audio_level: float = 0.0) -> None:
+        normalized_level = min(1.0, max(0.0, float(audio_level)))
         payload = {
             "recording": is_recording,
             "state": "recording" if is_recording else "idle",
+            "audio_level": normalized_level if is_recording else 0.0,
         }
         path = self._config.status_file
         tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -356,6 +363,36 @@ class VoiceMouseApp:
             _ = tmp_path.replace(path)
         except Exception:
             return
+
+    def _start_meter_updates(self) -> None:
+        self._stop_meter_updates()
+        self._meter_stop_event = threading.Event()
+        worker = threading.Thread(
+            target=self._run_meter_updates,
+            args=(self._meter_stop_event,),
+            daemon=True,
+        )
+        self._meter_thread = worker
+        worker.start()
+
+    def _run_meter_updates(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(0.08):
+            try:
+                if not self._recorder.is_recording:
+                    return
+                level = self._recorder.input_level
+                self._set_recording_status(True, audio_level=level)
+            except Exception:
+                return
+
+    def _stop_meter_updates(self) -> None:
+        stop_event = getattr(self, "_meter_stop_event", None)
+        thread = getattr(self, "_meter_thread", None)
+        if isinstance(stop_event, threading.Event):
+            stop_event.set()
+        if isinstance(thread, threading.Thread) and thread.is_alive():
+            thread.join(timeout=0.5)
+        self._meter_thread = None
 
     def _initial_openclaw_route_enabled(self) -> bool:
         if self._config.openclaw_route_mode == "always":

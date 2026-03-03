@@ -58,11 +58,17 @@ class AudioRecorder:
         self._frames: list[AudioFrame] = []
         self._stream: _AudioStream | None = None
         self._recording: bool = False
+        self._input_level: float = 0.0
 
     @property
     def is_recording(self) -> bool:
         with self._lock:
             return self._recording
+
+    @property
+    def input_level(self) -> float:
+        with self._lock:
+            return self._input_level
 
     def start(self) -> None:
         self._ensure_audio_modules()
@@ -76,6 +82,7 @@ class AudioRecorder:
                     f"Failed to create temp audio directory {self._temp_dir}: {error}"
                 ) from error
             self._frames = []
+            self._input_level = 0.0
             if self._sd is None:
                 raise RuntimeError("Audio input module not initialized")
             stream = self._sd.InputStream(
@@ -95,6 +102,7 @@ class AudioRecorder:
             stream = self._stream
             self._stream = None
             self._recording = False
+            self._input_level = 0.0
 
         if stream is not None:
             stream.stop()
@@ -122,11 +130,13 @@ class AudioRecorder:
         with self._lock:
             if not self._recording:
                 self._frames = []
+                self._input_level = 0.0
                 return
             stream = self._stream
             self._stream = None
             self._recording = False
             self._frames = []
+            self._input_level = 0.0
 
         if stream is not None:
             stream.stop()
@@ -138,9 +148,16 @@ class AudioRecorder:
         del frames
         del time_data
         del status
+        audio = indata.astype(np.float32, copy=False)
+        if audio.size <= 0:
+            level = 0.0
+        else:
+            level = float(np.sqrt(np.mean(np.square(audio))))
+        level = min(1.0, max(0.0, level))
         with self._lock:
             if self._recording:
                 self._frames.append(indata.copy())
+                self._input_level = max(level, self._input_level * 0.82)
 
     def _ensure_audio_modules(self) -> None:
         if self._sd is not None and self._sf is not None:

@@ -34,11 +34,18 @@ class VibeMouseTrayApp:
 
         self.openclaw_route_enabled = False
         self.recording = False
+        self.audio_level = 0.0
+        self.audio_activity = 0.0
+        self.overlay_enabled = self._read_env_bool(
+            "VIBEMOUSE_TRAY_MIC_OVERLAY",
+            False,
+        )
+        self.overlay_process: subprocess.Popen[str] | None = None
         self.state: State = "stopped"
 
         self.icon = pystray.Icon(
             "vibemouse",
-            self._render_icon("stopped"),
+            self._render_icon("stopped", audio_level=0.0),
             "VibeMouse: stopped",
             menu=pystray.Menu(
                 pystray.MenuItem(lambda _item: self._status_text(), None, enabled=False),
@@ -115,6 +122,7 @@ class VibeMouseTrayApp:
     def on_exit_click(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         self.running = False
         self.stop_service()
+        self._stop_overlay()
         self.icon.stop()
 
     def start_service(self) -> None:
@@ -151,6 +159,7 @@ class VibeMouseTrayApp:
 
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.reader_thread.start()
+        self._ensure_overlay_started()
         self._refresh_visual_state(force=True)
         self.icon.notify("VibeMouse starting. First cold start may take 1-3 minutes.")
 
@@ -170,6 +179,9 @@ class VibeMouseTrayApp:
         self.process = None
         self.recording = False
         self.starting_until_monotonic = 0.0
+        self.audio_level = 0.0
+        self.audio_activity = 0.0
+        self._stop_overlay()
         self._refresh_visual_state(force=True)
 
     def _reader_loop(self) -> None:
@@ -208,33 +220,56 @@ class VibeMouseTrayApp:
             elif "transcriber prewarm complete" in lower:
                 self.starting_until_monotonic = 0.0
 
-    def _read_recording_state(self) -> bool:
+    def _read_status_state(self) -> tuple[bool, float]:
         if not self.status_file.exists():
-            return False
+            return False, 0.0
         try:
             payload = json.loads(self.status_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return False
-        return bool(payload.get("recording", False))
+            return False, 0.0
+        recording = bool(payload.get("recording", False))
+        level_raw = payload.get("audio_level", 0.0)
+        try:
+            audio_level = float(level_raw)
+        except (TypeError, ValueError):
+            audio_level = 0.0
+        audio_level = min(1.0, max(0.0, audio_level))
+        return recording, audio_level
 
     def _refresh_visual_state(self, *, force: bool) -> None:
         old_state = self.state
         old_recording = self.recording
+        old_audio_bucket = self._audio_bucket(self.audio_activity)
 
-        self.recording = self._read_recording_state()
+        self.recording, self.audio_level = self._read_status_state()
         if self.process is None:
             self.state = "stopped"
+            self.audio_activity = 0.0
         elif time.monotonic() < self.starting_until_monotonic and not self.recording:
             self.state = "starting"
+            self.audio_activity = 0.0
         elif self.recording:
             self.state = "recording"
+            activity_now = self._normalize_audio_activity(self.audio_level)
+            self.audio_activity = max(activity_now, self.audio_activity * 0.72)
         else:
             self.state = "idle"
+            self.audio_level = 0.0
+            self.audio_activity = 0.0
 
-        if not force and old_state == self.state and old_recording == self.recording:
+        new_audio_bucket = self._audio_bucket(self.audio_activity)
+
+        if (
+            not force
+            and old_state == self.state
+            and old_recording == self.recording
+            and old_audio_bucket == new_audio_bucket
+        ):
             return
 
-        self.icon.icon = self._render_icon(self.state)
+        self.icon.icon = self._render_icon(
+            self.state, audio_level=self.audio_activity
+        )
         self.icon.title = self._status_text()
         self.icon.update_menu()
 
@@ -244,7 +279,7 @@ class VibeMouseTrayApp:
         if self.state == "starting":
             return "Status: starting (warming up...)"
         if self.state == "recording":
-            return "Status: recording"
+            return f"Status: recording (mic {int(self.audio_activity * 100)}%)"
         return "Status: idle"
 
     def _route_text(self) -> str:
@@ -252,7 +287,7 @@ class VibeMouseTrayApp:
         return f"OpenClaw route: {mode} (toggle F8)"
 
     @staticmethod
-    def _render_icon(state: State) -> Image.Image:
+    def _render_icon(state: State, *, audio_level: float) -> Image.Image:
         if state == "recording":
             color = (220, 53, 69, 255)
         elif state == "starting":
@@ -266,7 +301,80 @@ class VibeMouseTrayApp:
         draw = ImageDraw.Draw(image)
         draw.ellipse((8, 8, 56, 56), fill=color)
         draw.ellipse((12, 12, 52, 52), outline=(255, 255, 255, 220), width=2)
+        if state == "recording":
+            activity = max(0.0, audio_level - 0.03) / 0.22
+            activity = min(1.0, activity)
+            radius = 8 + int(12 * activity)
+            alpha = 120 + int(110 * activity)
+            draw.ellipse(
+                (32 - radius, 32 - radius, 32 + radius, 32 + radius),
+                fill=(255, 245, 245, alpha),
+            )
         return image
+
+    @staticmethod
+    def _audio_bucket(audio_level: float) -> int:
+        return int(max(0.0, min(1.0, audio_level)) * 20)
+
+    @staticmethod
+    def _normalize_audio_activity(raw_level: float) -> float:
+        level = max(0.0, float(raw_level))
+        noise_floor = 0.0012
+        speech_peak = 0.018
+        if level <= noise_floor:
+            return 0.0
+        return min(1.0, (level - noise_floor) / (speech_peak - noise_floor))
+
+    @staticmethod
+    def _read_env_bool(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _ensure_overlay_started(self) -> None:
+        if not self.overlay_enabled:
+            return
+        proc = self.overlay_process
+        if proc is not None and proc.poll() is None:
+            return
+
+        script = self.project_root / "scripts" / "run_mic_overlay.py"
+        if not script.exists():
+            self._append_log(f"[WARN] Mic overlay script missing: {script}")
+            return
+
+        pythonw_path = self.venv_python.with_name("pythonw.exe")
+        python_exec = pythonw_path if pythonw_path.exists() else self.venv_python
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            self.overlay_process = subprocess.Popen(
+                [str(python_exec), str(script), str(self.status_file)],
+                cwd=str(self.project_root),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+        except OSError as error:
+            self.overlay_process = None
+            self._append_log(f"[WARN] Failed to start mic overlay: {error}")
+
+    def _stop_overlay(self) -> None:
+        proc = self.overlay_process
+        self.overlay_process = None
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=1.5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                return
 
     def _append_log(self, line: str) -> None:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)

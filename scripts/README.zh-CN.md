@@ -54,6 +54,11 @@ Cursor CLI 兼容：
 - 热键托盘脚本默认开启 `VIBEMOUSE_WINDOWS_CURSOR_TERMINAL_MODE=true`
 - 在 Cursor 里会优先按终端粘贴顺序：`Shift+Insert` -> `Ctrl+Shift+V` -> `Ctrl+V`
 
+Win11 录音动态反馈：
+- 热键托盘脚本默认开启 `VIBEMOUSE_TRAY_MIC_OVERLAY=true`
+- 录音时会出现桌面悬浮麦克风点，随音量强弱动态变化
+- 无声时基本不动，停止录音时自动隐藏
+
 ## 个人词典与记忆文件
 
 - 词典文件：`.runtime/user_dictionary.json`
