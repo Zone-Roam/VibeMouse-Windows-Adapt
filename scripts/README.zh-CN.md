@@ -59,6 +59,19 @@ Win11 录音动态反馈：
 - 录音时会出现桌面悬浮麦克风点，随音量强弱动态变化
 - 无声时基本不动，停止录音时自动隐藏
 
+中译英翻译（DeepSeek API）：
+- 不再使用翻译快捷键（默认禁用）
+- 在托盘图标右键菜单勾选：`Enable ZH->EN Translation`
+- 勾选后运行中即时生效（不重启服务）
+- API Key 推荐放在项目脚本，不要写入系统环境变量：
+  1. 复制 `scripts/local_api_keys.example.bat` 为 `scripts/local_api_keys.bat`
+  2. 编辑其中 `VIBEMOUSE_TRANSLATION_API_KEY`
+  3. 启动脚本会自动 `call scripts/local_api_keys.bat`
+- 默认走 DeepSeek OpenAI 兼容接口：
+  - `VIBEMOUSE_TRANSLATION_API_BASE=https://api.deepseek.com/v1`
+  - `VIBEMOUSE_TRANSLATION_MODEL=deepseek-chat`
+- 未设置 API Key 时，翻译会自动跳过并保留原文输出（不会报错退出）
+
 ## 个人词典与记忆文件
 
 - 词典文件：`.runtime/user_dictionary.json`

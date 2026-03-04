@@ -14,6 +14,7 @@ from vibemouse.mouse_listener import SideButtonListener
 from vibemouse.output import TextOutput
 from vibemouse.system_integration import SystemIntegration, create_system_integration
 from vibemouse.transcriber import SenseVoiceTranscriber
+from vibemouse.translator import ApiTextTranslator
 
 
 TranscriptionTarget = Literal["default", "openclaw"]
@@ -33,6 +34,15 @@ class VoiceMouseApp:
             temp_dir=config.temp_dir,
         )
         self._transcriber: SenseVoiceTranscriber = SenseVoiceTranscriber(config)
+        self._translator: ApiTextTranslator = ApiTextTranslator(
+            provider=config.translation_provider,
+            api_base=config.translation_api_base,
+            api_key=config.translation_api_key,
+            model=config.translation_model,
+            timeout_s=config.translation_timeout_s,
+            retries=config.translation_retries,
+            only_if_chinese=config.translation_only_if_chinese,
+        )
         self._output: TextOutput = TextOutput(
             system_integration=self._system_integration,
             openclaw_command=config.openclaw_command,
@@ -55,9 +65,17 @@ class VoiceMouseApp:
         self._openclaw_route_lock: threading.Lock = threading.Lock()
         self._openclaw_toggle_listener: _ToggleListener | None = None
         self._openclaw_route_enabled: bool = self._initial_openclaw_route_enabled()
+        self._translation_route_lock: threading.Lock = threading.Lock()
+        self._translation_toggle_listener: _ToggleListener | None = None
+        self._translation_route_enabled: bool = bool(config.translation_toggle_initial)
+        self._control_stop_event: threading.Event = threading.Event()
+        self._control_thread: threading.Thread | None = None
+        self._control_last_mtime_ns: int | None = None
 
     def run(self) -> None:
         self._start_openclaw_toggle_listener()
+        self._start_translation_toggle_listener()
+        self._start_control_watcher()
         self._listener.start()
         self._set_recording_status(False)
         route_mode = self._config.openclaw_route_mode
@@ -68,6 +86,13 @@ class VoiceMouseApp:
             )
         else:
             route_detail = "openclaw_route=always"
+        translation_hotkey = self._config.translation_toggle_hotkey or "disabled"
+        translation_detail = (
+            f"translation_route={self._translation_route_enabled}, "
+            + f"translation_hotkey={translation_hotkey}, "
+            + f"translation_model={self._config.translation_model}, "
+            + f"translation_api_key={'set' if self._translator.has_api_key else 'missing'}"
+        )
         print(
             "VibeMouse ready. "
             + f"Model={self._config.model_name}, preferred_device={self._config.device}, "
@@ -80,7 +105,8 @@ class VoiceMouseApp:
             + f"gesture_threshold_px={self._config.gesture_threshold_px}, "
             + f"gesture_freeze_pointer={self._config.gesture_freeze_pointer}, "
             + f"gesture_restore_cursor={self._config.gesture_restore_cursor}, "
-            + f"prewarm_on_start={self._config.prewarm_on_start}, {route_detail}. "
+            + f"prewarm_on_start={self._config.prewarm_on_start}, "
+            + f"{route_detail}, {translation_detail}. "
             + self._controls_hint()
         )
         self._maybe_prewarm_transcriber()
@@ -95,6 +121,8 @@ class VoiceMouseApp:
         self._stop_meter_updates()
         self._listener.stop()
         self._stop_openclaw_toggle_listener()
+        self._stop_translation_toggle_listener()
+        self._stop_control_watcher()
         self._recorder.cancel()
         self._set_recording_status(False)
         with self._workers_lock:
@@ -279,13 +307,18 @@ class VoiceMouseApp:
                 print("No speech recognized")
                 return
 
+            processed_text, translation_status = self._maybe_translate_text(
+                text,
+                output_target=output_target,
+            )
+
             if output_target == "openclaw":
-                dispatch = self._output.send_to_openclaw_result(text)
+                dispatch = self._output.send_to_openclaw_result(processed_text)
                 route = dispatch.route
                 dispatch_reason = dispatch.reason
             else:
                 route = self._output.inject_or_clipboard(
-                    text,
+                    processed_text,
                     auto_paste=self._config.auto_paste,
                 )
                 dispatch_reason = "n/a"
@@ -296,30 +329,44 @@ class VoiceMouseApp:
             if output_target == "openclaw":
                 if route == "openclaw":
                     print(
-                        f"Transcribed with {backend} on {device}, sent to OpenClaw ({dispatch_reason})"
+                        "Transcribed with "
+                        + f"{backend} on {device}, sent to OpenClaw "
+                        + f"({dispatch_reason}, translation={translation_status})"
                     )
                 elif route == "clipboard":
                     print(
-                        f"Transcribed with {backend} on {device}, OpenClaw unavailable so copied to clipboard ({dispatch_reason})"
+                        "Transcribed with "
+                        + f"{backend} on {device}, OpenClaw unavailable so copied to clipboard "
+                        + f"({dispatch_reason}, translation={translation_status})"
                     )
                 else:
                     print(
-                        f"Transcribed with {backend} on {device}, but OpenClaw output was empty ({dispatch_reason})"
+                        "Transcribed with "
+                        + f"{backend} on {device}, but OpenClaw output was empty "
+                        + f"({dispatch_reason}, translation={translation_status})"
                     )
                 return
 
             if route == "typed":
                 print(
-                    f"Transcribed with {backend} on {device}, typed into focused input"
+                    f"Transcribed with {backend} on {device}, typed into focused input "
+                    + f"(translation={translation_status})"
                 )
             elif route == "pasted":
                 print(
-                    f"Transcribed with {backend} on {device}, pasted via system shortcut"
+                    f"Transcribed with {backend} on {device}, pasted via system shortcut "
+                    + f"(translation={translation_status})"
                 )
             elif route == "clipboard":
-                print(f"Transcribed with {backend} on {device}, copied to clipboard")
+                print(
+                    f"Transcribed with {backend} on {device}, copied to clipboard "
+                    + f"(translation={translation_status})"
+                )
             else:
-                print(f"Transcribed with {backend} on {device}, but output was empty")
+                print(
+                    f"Transcribed with {backend} on {device}, but output was empty "
+                    + f"(translation={translation_status})"
+                )
         except Exception as error:
             print(f"Transcription failed: {error}")
         finally:
@@ -405,6 +452,41 @@ class VoiceMouseApp:
         with self._openclaw_route_lock:
             return "openclaw" if self._openclaw_route_enabled else "default"
 
+    def _translation_active(self) -> bool:
+        lock = getattr(self, "_translation_route_lock", None)
+        if lock is not None:
+            try:
+                with lock:
+                    return bool(getattr(self, "_translation_route_enabled", False))
+            except Exception:
+                return bool(getattr(self, "_translation_route_enabled", False))
+        return bool(getattr(self, "_translation_route_enabled", False))
+
+    def _should_translate_for_target(self, output_target: TranscriptionTarget) -> bool:
+        if not self._translation_active():
+            return False
+        if output_target == "openclaw":
+            config = getattr(self, "_config", None)
+            return bool(getattr(config, "translation_apply_to_openclaw", False))
+        return True
+
+    def _maybe_translate_text(
+        self,
+        text: str,
+        *,
+        output_target: TranscriptionTarget,
+    ) -> tuple[str, str]:
+        if not self._should_translate_for_target(output_target):
+            return text, "off"
+
+        translator = getattr(self, "_translator", None)
+        if translator is None:
+            return text, "off"
+        result = translator.translate_cn_to_en(text)
+        if result.status == "translated":
+            return result.text, result.status
+        return text, result.status
+
     def _toggle_openclaw_route(self) -> None:
         if self._config.openclaw_route_mode != "toggle":
             return
@@ -415,6 +497,21 @@ class VoiceMouseApp:
             print("OpenClaw routing: ON")
         else:
             print("OpenClaw routing: OFF")
+
+    def _toggle_translation_route(self) -> None:
+        with self._translation_route_lock:
+            enabled = not self._translation_route_enabled
+        self._set_translation_route(enabled)
+
+    def _set_translation_route(self, enabled: bool) -> None:
+        with self._translation_route_lock:
+            if self._translation_route_enabled == enabled:
+                return
+            self._translation_route_enabled = enabled
+        if enabled:
+            print("Translation routing (ZH->EN): ON")
+        else:
+            print("Translation routing (ZH->EN): OFF")
 
     def _start_openclaw_toggle_listener(self) -> None:
         if self._config.openclaw_route_mode != "toggle":
@@ -461,6 +558,101 @@ class VoiceMouseApp:
             listener.stop()
         except Exception:
             return
+
+    def _start_translation_toggle_listener(self) -> None:
+        hotkey = self._config.translation_toggle_hotkey.strip().lower()
+        if not hotkey or hotkey == "none":
+            print("Translation route toggle hotkey disabled")
+            return
+
+        try:
+            keyboard_module = importlib.import_module("pynput.keyboard")
+            listener_ctor = getattr(keyboard_module, "Listener")
+        except Exception as error:
+            print(f"Translation route hotkey unavailable: {error}")
+            return
+
+        if not callable(listener_ctor):
+            print("Translation route hotkey unavailable: pynput Listener missing")
+            return
+
+        def on_release(key: object) -> None:
+            if self._normalize_key_name(key) == hotkey:
+                self._toggle_translation_route()
+
+        try:
+            listener = listener_ctor(on_release=on_release)
+            listener.start()
+        except Exception as error:
+            print(f"Failed to start translation route hotkey listener: {error}")
+            return
+
+        self._translation_toggle_listener = listener
+        print(
+            "Translation route toggle hotkey active: "
+            + f"{self._config.translation_toggle_hotkey.upper()}"
+        )
+
+    def _stop_translation_toggle_listener(self) -> None:
+        listener = self._translation_toggle_listener
+        self._translation_toggle_listener = None
+        if listener is None:
+            return
+        try:
+            listener.stop()
+        except Exception:
+            return
+
+    def _start_control_watcher(self) -> None:
+        self._stop_control_watcher()
+        self._control_stop_event = threading.Event()
+        path = self._config.control_file
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        self._control_last_mtime_ns = None
+        self._apply_control_file_update()
+        worker = threading.Thread(
+            target=self._run_control_watcher,
+            args=(self._control_stop_event,),
+            daemon=True,
+        )
+        self._control_thread = worker
+        worker.start()
+
+    def _stop_control_watcher(self) -> None:
+        stop_event = getattr(self, "_control_stop_event", None)
+        thread = getattr(self, "_control_thread", None)
+        if isinstance(stop_event, threading.Event):
+            stop_event.set()
+        if isinstance(thread, threading.Thread) and thread.is_alive():
+            thread.join(timeout=0.5)
+        self._control_thread = None
+
+    def _run_control_watcher(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(0.20):
+            self._apply_control_file_update()
+
+    def _apply_control_file_update(self) -> None:
+        path = self._config.control_file
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        mtime_ns = stat.st_mtime_ns
+        if self._control_last_mtime_ns == mtime_ns:
+            return
+        self._control_last_mtime_ns = mtime_ns
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        value = payload.get("translation_enabled")
+        if isinstance(value, bool):
+            self._set_translation_route(value)
 
     @staticmethod
     def _normalize_key_name(key: object) -> str:

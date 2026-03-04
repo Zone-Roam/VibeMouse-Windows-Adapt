@@ -107,6 +107,7 @@ class AppConfig:
     trust_remote_code: bool
     prewarm_on_start: bool
     status_file: Path
+    control_file: Path
     openclaw_command: str
     openclaw_agent: str | None
     openclaw_timeout_s: float
@@ -114,6 +115,16 @@ class AppConfig:
     openclaw_route_mode: str
     openclaw_toggle_initial: bool
     openclaw_toggle_hotkey: str
+    translation_toggle_initial: bool
+    translation_toggle_hotkey: str
+    translation_provider: str
+    translation_api_base: str
+    translation_api_key: str
+    translation_model: str
+    translation_timeout_s: float
+    translation_retries: int
+    translation_only_if_chinese: bool
+    translation_apply_to_openclaw: bool
     user_dictionary_file: Path
     text_history_file: Path
     text_history_enabled: bool
@@ -133,6 +144,9 @@ def load_config() -> AppConfig:
     runtime_dir = Path(os.getenv("XDG_RUNTIME_DIR", tempfile.gettempdir()))
     status_file = Path(
         os.getenv("VIBEMOUSE_STATUS_FILE", str(runtime_dir / "vibemouse-status.json"))
+    )
+    control_file = Path(
+        os.getenv("VIBEMOUSE_CONTROL_FILE", str(status_file.parent / "vibemouse-control.json"))
     )
 
     sample_rate = _require_positive(
@@ -235,6 +249,57 @@ def load_config() -> AppConfig:
     )
     openclaw_toggle_initial = _read_bool("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", False)
     openclaw_toggle_hotkey = os.getenv("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8").strip()
+    translation_toggle_initial = _read_bool("VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL", False)
+    translation_toggle_hotkey = os.getenv(
+        "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY",
+        "none",
+    ).strip()
+    if (
+        openclaw_toggle_hotkey
+        and translation_toggle_hotkey
+        and openclaw_toggle_hotkey.lower() != "none"
+        and translation_toggle_hotkey.lower() != "none"
+        and _canonical_hotkey(openclaw_toggle_hotkey)
+        == _canonical_hotkey(translation_toggle_hotkey)
+    ):
+        raise ValueError(
+            "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY must differ from "
+            + "VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY"
+        )
+    translation_provider = _read_choice(
+        "VIBEMOUSE_TRANSLATION_PROVIDER",
+        "openai_compatible",
+        {"openai_compatible"},
+    )
+    translation_api_base = os.getenv(
+        "VIBEMOUSE_TRANSLATION_API_BASE",
+        "https://api.openai.com/v1",
+    ).strip()
+    if not translation_api_base:
+        raise ValueError("VIBEMOUSE_TRANSLATION_API_BASE must not be empty")
+    translation_api_key = os.getenv("VIBEMOUSE_TRANSLATION_API_KEY", "").strip()
+    translation_model = os.getenv(
+        "VIBEMOUSE_TRANSLATION_MODEL",
+        "gpt-4o-mini",
+    ).strip()
+    if not translation_model:
+        raise ValueError("VIBEMOUSE_TRANSLATION_MODEL must not be empty")
+    translation_timeout_s = _require_positive_float(
+        "VIBEMOUSE_TRANSLATION_TIMEOUT_S",
+        _read_float("VIBEMOUSE_TRANSLATION_TIMEOUT_S", 12.0),
+    )
+    translation_retries = _require_non_negative(
+        "VIBEMOUSE_TRANSLATION_RETRIES",
+        _read_int("VIBEMOUSE_TRANSLATION_RETRIES", 1),
+    )
+    translation_only_if_chinese = _read_bool(
+        "VIBEMOUSE_TRANSLATION_ONLY_IF_CHINESE",
+        True,
+    )
+    translation_apply_to_openclaw = _read_bool(
+        "VIBEMOUSE_TRANSLATION_APPLY_TO_OPENCLAW",
+        False,
+    )
     user_dictionary_file = Path(
         os.getenv(
             "VIBEMOUSE_USER_DICTIONARY_FILE",
@@ -279,6 +344,7 @@ def load_config() -> AppConfig:
         trust_remote_code=_read_bool("VIBEMOUSE_TRUST_REMOTE_CODE", False),
         prewarm_on_start=_read_bool("VIBEMOUSE_PREWARM_ON_START", True),
         status_file=status_file,
+        control_file=control_file,
         openclaw_command=openclaw_command,
         openclaw_agent=openclaw_agent,
         openclaw_timeout_s=openclaw_timeout_s,
@@ -286,6 +352,16 @@ def load_config() -> AppConfig:
         openclaw_route_mode=openclaw_route_mode,
         openclaw_toggle_initial=openclaw_toggle_initial,
         openclaw_toggle_hotkey=openclaw_toggle_hotkey,
+        translation_toggle_initial=translation_toggle_initial,
+        translation_toggle_hotkey=translation_toggle_hotkey,
+        translation_provider=translation_provider,
+        translation_api_base=translation_api_base,
+        translation_api_key=translation_api_key,
+        translation_model=translation_model,
+        translation_timeout_s=translation_timeout_s,
+        translation_retries=translation_retries,
+        translation_only_if_chinese=translation_only_if_chinese,
+        translation_apply_to_openclaw=translation_apply_to_openclaw,
         user_dictionary_file=user_dictionary_file,
         text_history_file=text_history_file,
         text_history_enabled=text_history_enabled,

@@ -32,7 +32,7 @@ class VibeMouseGui:
 
         self.service_var = tk.StringVar(value="Service: stopped")
         self.record_var = tk.StringVar(value="State: idle")
-        self.hotkey_var = tk.StringVar(value="OpenClaw toggle hotkey: F8")
+        self.hotkey_var = tk.StringVar(value="OpenClaw toggle: F8 | Translate ZH->EN: tray menu")
 
         self._build_ui()
         self._schedule_poll()
@@ -65,7 +65,8 @@ class VibeMouseGui:
             "Mouse mapping:\n"
             "- Front side button: start/stop recording\n"
             "- Rear side button (idle): send Enter\n"
-            "- Rear side button (recording): normal output or OpenClaw (toggle by F8)"
+            "- Rear side button (recording): normal output or OpenClaw (toggle by F8)\n"
+            "- Translation route (ZH->EN): use tray right-click menu (requires API key)"
         )
         tk.Label(self.root, text=tips, justify=tk.LEFT).pack(anchor="w", padx=12, pady=(0, 6))
 
@@ -94,6 +95,15 @@ class VibeMouseGui:
         env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", "false")
         env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8")
         env.setdefault("VIBEMOUSE_OPENCLAW_COMMAND", "wsl -d Ubuntu -- openclaw")
+        env.setdefault("VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL", "false")
+        env.setdefault("VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY", "none")
+        env.setdefault("VIBEMOUSE_TRANSLATION_PROVIDER", "openai_compatible")
+        env.setdefault("VIBEMOUSE_TRANSLATION_API_BASE", "https://api.deepseek.com/v1")
+        env.setdefault("VIBEMOUSE_TRANSLATION_MODEL", "deepseek-chat")
+        env.setdefault("VIBEMOUSE_TRANSLATION_TIMEOUT_S", "12.0")
+        env.setdefault("VIBEMOUSE_TRANSLATION_RETRIES", "1")
+        env.setdefault("VIBEMOUSE_TRANSLATION_ONLY_IF_CHINESE", "true")
+        env.setdefault("VIBEMOUSE_TRANSLATION_APPLY_TO_OPENCLAW", "false")
 
         env["VIBEMOUSE_STATUS_FILE"] = str(self.status_file)
         return env

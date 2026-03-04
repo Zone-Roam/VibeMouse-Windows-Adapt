@@ -6,3 +6,4 @@ vibemouse.egg-info/
 __pycache__/
 *.pyc
 .runtime/
+scripts/local_api_keys.bat

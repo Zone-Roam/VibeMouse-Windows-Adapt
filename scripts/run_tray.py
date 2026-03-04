@@ -22,6 +22,7 @@ class VibeMouseTrayApp:
         self.venv_python = project_root / ".venv" / "Scripts" / "python.exe"
         self.runtime_dir = project_root / ".runtime"
         self.status_file = self.runtime_dir / "vibemouse-status.json"
+        self.control_file = self.runtime_dir / "vibemouse-control.json"
         self.log_file = self.runtime_dir / "vibemouse-tray.log"
 
         self.process: subprocess.Popen[str] | None = None
@@ -33,6 +34,11 @@ class VibeMouseTrayApp:
         self.startup_grace_s = 90.0
 
         self.openclaw_route_enabled = False
+        self.translation_route_enabled = False
+        self.translation_enabled_for_start = self._read_env_bool(
+            "VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL",
+            False,
+        )
         self.recording = False
         self.audio_level = 0.0
         self.audio_activity = 0.0
@@ -53,6 +59,16 @@ class VibeMouseTrayApp:
                     lambda _item: self._route_text(),
                     None,
                     enabled=False,
+                ),
+                pystray.MenuItem(
+                    lambda _item: self._translation_text(),
+                    None,
+                    enabled=False,
+                ),
+                pystray.MenuItem(
+                    "Enable ZH->EN Translation",
+                    self.on_toggle_translation_click,
+                    checked=lambda _item: self.translation_enabled_for_start,
                 ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(
@@ -90,7 +106,20 @@ class VibeMouseTrayApp:
         env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", "false")
         env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8")
         env.setdefault("VIBEMOUSE_OPENCLAW_COMMAND", "wsl -d Ubuntu -- openclaw")
+        env.setdefault("VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL", "false")
+        env["VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL"] = (
+            "true" if self.translation_enabled_for_start else "false"
+        )
+        env.setdefault("VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY", "none")
+        env.setdefault("VIBEMOUSE_TRANSLATION_PROVIDER", "openai_compatible")
+        env.setdefault("VIBEMOUSE_TRANSLATION_API_BASE", "https://api.deepseek.com/v1")
+        env.setdefault("VIBEMOUSE_TRANSLATION_MODEL", "deepseek-chat")
+        env.setdefault("VIBEMOUSE_TRANSLATION_TIMEOUT_S", "12.0")
+        env.setdefault("VIBEMOUSE_TRANSLATION_RETRIES", "1")
+        env.setdefault("VIBEMOUSE_TRANSLATION_ONLY_IF_CHINESE", "true")
+        env.setdefault("VIBEMOUSE_TRANSLATION_APPLY_TO_OPENCLAW", "false")
         env.setdefault("VIBEMOUSE_STATUS_FILE", str(self.status_file))
+        env.setdefault("VIBEMOUSE_CONTROL_FILE", str(self.control_file))
         env.setdefault("PYTHONUNBUFFERED", "1")
         return env
 
@@ -119,6 +148,27 @@ class VibeMouseTrayApp:
         except OSError:
             pass
 
+    def on_toggle_translation_click(
+        self, _icon: pystray.Icon, _item: pystray.MenuItem
+    ) -> None:
+        self.translation_enabled_for_start = not self.translation_enabled_for_start
+        enabled_text = "ON" if self.translation_enabled_for_start else "OFF"
+        was_running = self.process is not None
+        if was_running:
+            if self._write_translation_control(self.translation_enabled_for_start):
+                self.translation_route_enabled = self.translation_enabled_for_start
+                self.icon.notify(f"Translate ZH->EN set to {enabled_text}. Applied live.")
+            else:
+                self.icon.notify(
+                    "Translate ZH->EN toggle failed to apply live. "
+                    + "Try restarting the service once."
+                )
+        else:
+            self.icon.notify(
+                f"Translate ZH->EN set to {enabled_text}. Will apply on next start."
+            )
+        self.icon.update_menu()
+
     def on_exit_click(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         self.running = False
         self.stop_service()
@@ -130,7 +180,9 @@ class VibeMouseTrayApp:
             return
 
         env = self.build_env()
+        _ = self._write_translation_control(self.translation_enabled_for_start)
         self.openclaw_route_enabled = False
+        self.translation_route_enabled = self.translation_enabled_for_start
         self.starting_until_monotonic = time.monotonic() + self.startup_grace_s
         self._append_log("[INFO] Starting VibeMouse process...")
         self._append_log(
@@ -211,10 +263,18 @@ class VibeMouseTrayApp:
                 self.openclaw_route_enabled = True
             elif "openclaw routing: off" in lower:
                 self.openclaw_route_enabled = False
+            elif "translation routing (zh->en): on" in lower:
+                self.translation_route_enabled = True
+            elif "translation routing (zh->en): off" in lower:
+                self.translation_route_enabled = False
             elif "openclaw_route=true" in lower:
                 self.openclaw_route_enabled = True
             elif "openclaw_route=false" in lower:
                 self.openclaw_route_enabled = False
+            elif "translation_route=true" in lower:
+                self.translation_route_enabled = True
+            elif "translation_route=false" in lower:
+                self.translation_route_enabled = False
             elif "vibemouse ready." in lower:
                 self.starting_until_monotonic = 0.0
             elif "transcriber prewarm complete" in lower:
@@ -285,6 +345,11 @@ class VibeMouseTrayApp:
     def _route_text(self) -> str:
         mode = "ON" if self.openclaw_route_enabled else "OFF"
         return f"OpenClaw route: {mode} (toggle F8)"
+
+    def _translation_text(self) -> str:
+        mode = "ON" if self.translation_route_enabled else "OFF"
+        startup = "ON" if self.translation_enabled_for_start else "OFF"
+        return f"Translate ZH->EN: runtime={mode}, startup={startup} (tray menu)"
 
     @staticmethod
     def _render_icon(state: State, *, audio_level: float) -> Image.Image:
@@ -380,6 +445,20 @@ class VibeMouseTrayApp:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         with self.log_file.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+
+    def _write_translation_control(self, enabled: bool) -> bool:
+        payload = {
+            "translation_enabled": bool(enabled),
+            "ts_unix": time.time(),
+        }
+        tmp_file = self.control_file.with_suffix(self.control_file.suffix + ".tmp")
+        try:
+            self.control_file.parent.mkdir(parents=True, exist_ok=True)
+            _ = tmp_file.write_text(json.dumps(payload), encoding="utf-8")
+            _ = tmp_file.replace(self.control_file)
+            return True
+        except Exception:
+            return False
 
 
 def main() -> int:

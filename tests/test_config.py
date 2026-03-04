@@ -27,6 +27,7 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.button_debounce_ms, 150)
         self.assertTrue(config.prewarm_on_start)
         self.assertEqual(config.status_file.name, "vibemouse-status.json")
+        self.assertEqual(config.control_file.name, "vibemouse-control.json")
         self.assertEqual(config.openclaw_command, "openclaw")
         self.assertEqual(config.openclaw_agent, "main")
         self.assertEqual(config.openclaw_timeout_s, 20.0)
@@ -34,6 +35,16 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_route_mode, "always")
         self.assertFalse(config.openclaw_toggle_initial)
         self.assertEqual(config.openclaw_toggle_hotkey, "f8")
+        self.assertFalse(config.translation_toggle_initial)
+        self.assertEqual(config.translation_toggle_hotkey, "none")
+        self.assertEqual(config.translation_provider, "openai_compatible")
+        self.assertEqual(config.translation_api_base, "https://api.openai.com/v1")
+        self.assertEqual(config.translation_api_key, "")
+        self.assertEqual(config.translation_model, "gpt-4o-mini")
+        self.assertEqual(config.translation_timeout_s, 12.0)
+        self.assertEqual(config.translation_retries, 1)
+        self.assertTrue(config.translation_only_if_chinese)
+        self.assertFalse(config.translation_apply_to_openclaw)
         self.assertEqual(config.user_dictionary_file.name, "user_dictionary.json")
         self.assertEqual(config.text_history_file.name, "transcript-history.jsonl")
         self.assertTrue(config.text_history_enabled)
@@ -103,6 +114,17 @@ class LoadConfigTests(unittest.TestCase):
             config = load_config()
 
         self.assertEqual(config.status_file.name, "custom-vibemouse-status.json")
+        self.assertEqual(config.control_file.name, "vibemouse-control.json")
+
+    def test_control_file_can_be_overridden(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_CONTROL_FILE": "/tmp/custom-vibemouse-control.json"},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.control_file.name, "custom-vibemouse-control.json")
 
     def test_enter_mode_can_be_configured(self) -> None:
         with patch.dict(os.environ, {"VIBEMOUSE_ENTER_MODE": "ctrl_enter"}, clear=True):
@@ -238,6 +260,36 @@ class LoadConfigTests(unittest.TestCase):
         self.assertTrue(config.openclaw_toggle_initial)
         self.assertEqual(config.openclaw_toggle_hotkey, "f9")
 
+    def test_translation_fields_can_be_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL": "true",
+                "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY": "f6",
+                "VIBEMOUSE_TRANSLATION_PROVIDER": "openai_compatible",
+                "VIBEMOUSE_TRANSLATION_API_BASE": "https://api.example.com/v1",
+                "VIBEMOUSE_TRANSLATION_API_KEY": "test-key",
+                "VIBEMOUSE_TRANSLATION_MODEL": "gpt-4.1-mini",
+                "VIBEMOUSE_TRANSLATION_TIMEOUT_S": "9.5",
+                "VIBEMOUSE_TRANSLATION_RETRIES": "2",
+                "VIBEMOUSE_TRANSLATION_ONLY_IF_CHINESE": "false",
+                "VIBEMOUSE_TRANSLATION_APPLY_TO_OPENCLAW": "true",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertTrue(config.translation_toggle_initial)
+        self.assertEqual(config.translation_toggle_hotkey, "f6")
+        self.assertEqual(config.translation_provider, "openai_compatible")
+        self.assertEqual(config.translation_api_base, "https://api.example.com/v1")
+        self.assertEqual(config.translation_api_key, "test-key")
+        self.assertEqual(config.translation_model, "gpt-4.1-mini")
+        self.assertEqual(config.translation_timeout_s, 9.5)
+        self.assertEqual(config.translation_retries, 2)
+        self.assertFalse(config.translation_only_if_chinese)
+        self.assertTrue(config.translation_apply_to_openclaw)
+
     def test_hotkey_mode_fields_can_be_configured(self) -> None:
         with patch.dict(
             os.environ,
@@ -309,6 +361,69 @@ class LoadConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "VIBEMOUSE_OPENCLAW_ROUTE_MODE must be one of",
+            ):
+                _ = load_config()
+
+    def test_same_openclaw_and_translation_toggle_hotkeys_are_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY": "f8",
+                "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY": "F8",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY must differ",
+            ):
+                _ = load_config()
+
+    def test_invalid_translation_provider_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_TRANSLATION_PROVIDER": "azure"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_TRANSLATION_PROVIDER must be one of",
+            ):
+                _ = load_config()
+
+    def test_empty_translation_model_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_TRANSLATION_MODEL": "   "},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_TRANSLATION_MODEL must not be empty",
+            ):
+                _ = load_config()
+
+    def test_non_positive_translation_timeout_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_TRANSLATION_TIMEOUT_S": "0"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_TRANSLATION_TIMEOUT_S must be a positive float",
+            ):
+                _ = load_config()
+
+    def test_negative_translation_retries_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_TRANSLATION_RETRIES": "-1"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "VIBEMOUSE_TRANSLATION_RETRIES must be a non-negative integer",
             ):
                 _ = load_config()
 
