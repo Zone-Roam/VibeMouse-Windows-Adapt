@@ -38,6 +38,46 @@ The runtime is event-driven and split by responsibility:
 8. `vibemouse/doctor.py`
    - Built-in diagnostics for env, OpenClaw, input permissions, and known conflicts
 
+## Repository Structure (At a Glance)
+
+```text
+VibeMouse/
+  vibemouse/     # Runtime package (app, transcriber, output, config, doctor)
+  scripts/       # Windows launchers, tray GUI helpers, utility scripts
+  tests/         # Unit tests
+  docs/          # Deployment/adaptation guides and release notes
+```
+
+## Model and Backend Architecture
+
+- Primary ASR model: `iic/SenseVoiceSmall`
+- Backends:
+  - `funasr`: `funasr.AutoModel` + optional VAD (`fsmn-vad`)
+  - `funasr_onnx`: `funasr_onnx.SenseVoiceSmall` (ONNX path; quantized inference)
+  - `auto`: choose backend by preferred device and fallback rules
+- Device path:
+  - `VIBEMOUSE_DEVICE` controls preferred device
+  - If model load fails and `VIBEMOUSE_FALLBACK_CPU=true`, runtime falls back to CPU
+- Model source:
+  - ONNX mode resolves `iic/SenseVoiceSmall` to `iic/SenseVoiceSmall-onnx`
+  - Model assets can be downloaded via ModelScope snapshot API
+
+Default launcher profiles:
+- `scripts/start_vibemouse_tray_fast.bat` -> `VIBEMOUSE_BACKEND=funasr_onnx`
+- `scripts/start_vibemouse_tray_accurate.bat` -> `VIBEMOUSE_BACKEND=funasr`
+
+## Optional Translation Route (ZH -> EN)
+
+- Provider mode: OpenAI-compatible Chat Completions API (`/chat/completions`)
+- Config:
+  - `VIBEMOUSE_TRANSLATION_API_BASE`
+  - `VIBEMOUSE_TRANSLATION_API_KEY`
+  - `VIBEMOUSE_TRANSLATION_MODEL`
+- Defaults in config:
+  - API base: `https://api.openai.com/v1`
+  - model: `gpt-4o-mini`
+- If API key is empty, translation is skipped and original text is preserved.
+
 ## Quick Start (Linux)
 
 ### Ubuntu / Debian packages
@@ -68,6 +108,22 @@ pip install -e .
 export VIBEMOUSE_BACKEND=auto
 export VIBEMOUSE_DEVICE=cpu
 vibemouse
+```
+
+## Quick Start (Windows, Tray)
+
+From PowerShell in repo root:
+
+```powershell
+cd .\scripts
+.\start_vibemouse_tray_fast.bat
+```
+
+Accurate profile:
+
+```powershell
+cd .\scripts
+.\start_vibemouse_tray_accurate.bat
 ```
 
 ## Default Mapping and State Logic
