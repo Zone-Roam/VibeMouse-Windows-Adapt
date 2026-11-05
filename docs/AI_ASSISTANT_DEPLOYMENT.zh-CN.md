@@ -1,4 +1,7 @@
-# VibeMouse AI 助手部署与平台适配指南
+# VibeMouse AI 助手部署与平台适配指南（已暂缓）
+
+> 本文仅作为历史设计资料。当前 OpenClaw 集成已隔离并默认关闭，项目优先开发
+> Windows 核心语音输入能力。当前边界见 `docs/deferred/OPENCLAW.md`。
 
 本指南面向 AI 助手（以及使用 AI 助手的开发者），用于在新机器部署 VibeMouse，并安全地做新平台适配。
 

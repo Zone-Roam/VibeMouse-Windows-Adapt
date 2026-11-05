@@ -45,6 +45,7 @@ class VoiceMouseApp:
         )
         self._output: TextOutput = TextOutput(
             system_integration=self._system_integration,
+            openclaw_enabled=config.openclaw_enabled,
             openclaw_command=config.openclaw_command,
             openclaw_agent=config.openclaw_agent,
             openclaw_timeout_s=config.openclaw_timeout_s,
@@ -78,14 +79,16 @@ class VoiceMouseApp:
         self._start_control_watcher()
         self._listener.start()
         self._set_recording_status(False)
-        route_mode = self._config.openclaw_route_mode
-        if route_mode == "toggle":
-            route_detail = (
-                f"openclaw_route={self._openclaw_route_enabled}, "
-                + f"toggle_hotkey={self._config.openclaw_toggle_hotkey or 'disabled'}"
-            )
-        else:
-            route_detail = "openclaw_route=always"
+        route_detail = ""
+        if self._openclaw_feature_enabled():
+            route_mode = self._config.openclaw_route_mode
+            if route_mode == "toggle":
+                route_detail = (
+                    f"openclaw_route={self._openclaw_route_enabled}, "
+                    + f"toggle_hotkey={self._config.openclaw_toggle_hotkey or 'disabled'}, "
+                )
+            else:
+                route_detail = "openclaw_route=always, "
         translation_hotkey = self._config.translation_toggle_hotkey or "disabled"
         translation_detail = (
             f"translation_route={self._translation_route_enabled}, "
@@ -106,7 +109,7 @@ class VoiceMouseApp:
             + f"gesture_freeze_pointer={self._config.gesture_freeze_pointer}, "
             + f"gesture_restore_cursor={self._config.gesture_restore_cursor}, "
             + f"prewarm_on_start={self._config.prewarm_on_start}, "
-            + f"{route_detail}, {translation_detail}. "
+            + f"{route_detail}{translation_detail}. "
             + self._controls_hint()
         )
         self._maybe_prewarm_transcriber()
@@ -175,9 +178,7 @@ class VoiceMouseApp:
             if output_target == "openclaw":
                 print("Recording stopped by rear button, sending transcript to OpenClaw")
             else:
-                print(
-                    "Recording stopped by rear button, OpenClaw routing disabled so using normal text output"
-                )
+                print("Recording stopped by rear button, using normal text output")
             self._start_transcription_worker(recording, output_target=output_target)
             return
 
@@ -442,11 +443,15 @@ class VoiceMouseApp:
         self._meter_thread = None
 
     def _initial_openclaw_route_enabled(self) -> bool:
+        if not self._openclaw_feature_enabled():
+            return False
         if self._config.openclaw_route_mode == "always":
             return True
         return bool(self._config.openclaw_toggle_initial)
 
     def _target_for_rear_recording(self) -> TranscriptionTarget:
+        if not self._openclaw_feature_enabled():
+            return "default"
         if self._config.openclaw_route_mode == "always":
             return "openclaw"
         with self._openclaw_route_lock:
@@ -488,6 +493,8 @@ class VoiceMouseApp:
         return text, result.status
 
     def _toggle_openclaw_route(self) -> None:
+        if not self._openclaw_feature_enabled():
+            return
         if self._config.openclaw_route_mode != "toggle":
             return
         with self._openclaw_route_lock:
@@ -514,6 +521,8 @@ class VoiceMouseApp:
             print("Translation routing (ZH->EN): OFF")
 
     def _start_openclaw_toggle_listener(self) -> None:
+        if not self._openclaw_feature_enabled():
+            return
         if self._config.openclaw_route_mode != "toggle":
             return
 
@@ -548,6 +557,9 @@ class VoiceMouseApp:
         print(
             f"OpenClaw route toggle hotkey active: {self._config.openclaw_toggle_hotkey.upper()}"
         )
+
+    def _openclaw_feature_enabled(self) -> bool:
+        return bool(getattr(self._config, "openclaw_enabled", False))
 
     def _stop_openclaw_toggle_listener(self) -> None:
         listener = self._openclaw_toggle_listener

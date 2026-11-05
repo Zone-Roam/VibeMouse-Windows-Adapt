@@ -4,16 +4,12 @@ Mouse-side-button voice input for VibeCoding.
 
 中文文档：[`README.zh-CN.md`](./README.zh-CN.md)
 
-AI adaptation guides:
-- English: [`docs/AI_ASSISTANT_DEPLOYMENT.md`](./docs/AI_ASSISTANT_DEPLOYMENT.md)
-- 中文：[`docs/AI_ASSISTANT_DEPLOYMENT.zh-CN.md`](./docs/AI_ASSISTANT_DEPLOYMENT.zh-CN.md)
-
 ## What This Project Does
 
 VibeMouse binds your coding speech workflow to mouse side buttons:
 - Front side button: start/stop recording
 - Rear side button while idle: send Enter
-- Rear side button while recording: stop recording and route transcript to OpenClaw
+- Rear side button while recording: stop recording and output the transcript
 
 Core goals are low friction, stable daily use, and graceful fallback when any subsystem fails.
 
@@ -32,11 +28,11 @@ The runtime is event-driven and split by responsibility:
 5. `vibemouse/transcriber.py`
    - SenseVoice backend selection and transcription
 6. `vibemouse/output.py`
-   - Text typing / clipboard / OpenClaw dispatch, with fallback and reason tracking
+   - Text typing / clipboard routing and fallback
 7. `vibemouse/system_integration.py`
    - Platform adapter boundary (Hyprland now, Windows/macOS extension points prepared)
 8. `vibemouse/doctor.py`
-   - Built-in diagnostics for env, OpenClaw, input permissions, and known conflicts
+   - Built-in diagnostics for environment, input permissions, and known conflicts
 
 ## Repository Structure (At a Glance)
 
@@ -133,7 +129,7 @@ cd .\scripts
 
 State matrix:
 - Idle + rear press -> Enter (`VIBEMOUSE_ENTER_MODE`)
-- Recording + rear press -> stop recording + OpenClaw dispatch
+- Recording + rear press -> stop recording + normal text output
 
 If your hardware labels are reversed:
 
@@ -141,22 +137,6 @@ If your hardware labels are reversed:
 export VIBEMOUSE_FRONT_BUTTON=x2
 export VIBEMOUSE_REAR_BUTTON=x1
 ```
-
-## OpenClaw Integration (Core)
-
-OpenClaw route is explicit and configurable:
-- `VIBEMOUSE_OPENCLAW_COMMAND` (default `openclaw`)
-- `VIBEMOUSE_OPENCLAW_AGENT` (default `main`)
-- `VIBEMOUSE_OPENCLAW_TIMEOUT_S` (default `20.0`)
-- `VIBEMOUSE_OPENCLAW_RETRIES` (default `0`)
-
-Dispatch behavior:
-- Fast fire-and-forget spawn to avoid blocking UI interaction
-- Route result includes reason (`dispatched`, `dispatched_after_retry_*`, `spawn_error:*`, etc.)
-- Clipboard fallback if command is invalid or spawn fails
-
-Deployment tip: if you run your own local assistant setup, set
-`VIBEMOUSE_OPENCLAW_AGENT` to your own assistant ID.
 
 ## Built-in Doctor
 
@@ -168,7 +148,6 @@ vibemouse doctor
 
 Current checks include:
 - Config load validity
-- OpenClaw command resolution + agent existence
 - Microphone input availability
 - Linux input device permissions / side-button capability
 - Hyprland rear-button Return bind conflicts
@@ -207,13 +186,6 @@ Then reload:
 
 ```bash
 hyprctl reload config-only
-```
-
-### OpenClaw route not working
-
-```bash
-openclaw agent --agent main --message "ping" --json
-vibemouse doctor
 ```
 
 ### Side button not detected on Linux

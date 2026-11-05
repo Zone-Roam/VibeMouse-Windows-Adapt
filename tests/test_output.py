@@ -154,6 +154,23 @@ class TextOutputRoutingTests(unittest.TestCase):
         self.assertEqual(detail.route, "openclaw")
         self.assertEqual(detail.reason, "dispatched")
 
+    def test_disabled_openclaw_falls_back_without_spawning(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController()
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_openclaw_enabled", False)
+
+        with (
+            patch("vibemouse.output.pyperclip.copy") as copy_mock,
+            patch("vibemouse.integrations.openclaw.subprocess.Popen") as popen_mock,
+        ):
+            detail = subject.send_to_openclaw_result("hello")
+
+        self.assertEqual(detail.route, "clipboard")
+        self.assertEqual(detail.reason, "integration_disabled")
+        self.assertEqual(copy_mock.call_count, 1)
+        self.assertEqual(popen_mock.call_count, 0)
+
     def test_send_to_openclaw_includes_agent_when_configured(self) -> None:
         subject = self._make_subject()
         keyboard = _FakeKeyboardController()

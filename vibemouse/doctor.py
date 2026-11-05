@@ -26,7 +26,7 @@ def run_doctor() -> int:
     config_check, config = _check_config_load()
     checks.append(config_check)
 
-    if config is not None:
+    if config is not None and config.openclaw_enabled:
         checks.extend(_check_openclaw(config))
 
     checks.append(_check_audio_input(config))
@@ -68,7 +68,7 @@ def _check_config_load() -> tuple[DoctorCheck, AppConfig | None]:
         DoctorCheck(
             name="config",
             status="ok",
-            detail=input_detail + f", openclaw_agent={config.openclaw_agent or 'none'}",
+            detail=input_detail,
         ),
         config,
     )

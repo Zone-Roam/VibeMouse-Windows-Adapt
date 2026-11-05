@@ -58,6 +58,9 @@ Win11 录音动态反馈：
 - 热键托盘脚本默认开启 `VIBEMOUSE_TRAY_MIC_OVERLAY=true`
 - 录音时会出现桌面悬浮麦克风点，随音量强弱动态变化
 - 无声时基本不动，停止录音时自动隐藏
+- 悬浮层现已使用可扩展主题结构；默认主题为 `voice_orb`
+- 可通过 `VIBEMOUSE_OVERLAY_THEME=voice_orb` 显式选择主题
+- 新主题代码位于 `vibemouse/overlay/themes/`
 
 中译英翻译（DeepSeek API）：
 - 不再使用翻译快捷键（默认禁用）
@@ -83,7 +86,6 @@ Win11 录音动态反馈：
 {
   "replacements": {
     "telegarm": "Telegram",
-    "open claw": "OpenClaw",
     "chat g p t": "ChatGPT"
   }
 }

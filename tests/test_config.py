@@ -28,6 +28,7 @@ class LoadConfigTests(unittest.TestCase):
         self.assertTrue(config.prewarm_on_start)
         self.assertEqual(config.status_file.name, "vibemouse-status.json")
         self.assertEqual(config.control_file.name, "vibemouse-control.json")
+        self.assertFalse(config.openclaw_enabled)
         self.assertEqual(config.openclaw_command, "openclaw")
         self.assertEqual(config.openclaw_agent, "main")
         self.assertEqual(config.openclaw_timeout_s, 20.0)
@@ -240,6 +241,7 @@ class LoadConfigTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
                 "VIBEMOUSE_OPENCLAW_COMMAND": "openclaw --profile prod",
                 "VIBEMOUSE_OPENCLAW_AGENT": "ops-bot",
                 "VIBEMOUSE_OPENCLAW_TIMEOUT_S": "7.5",
@@ -252,6 +254,7 @@ class LoadConfigTests(unittest.TestCase):
         ):
             config = load_config()
 
+        self.assertTrue(config.openclaw_enabled)
         self.assertEqual(config.openclaw_command, "openclaw --profile prod")
         self.assertEqual(config.openclaw_agent, "ops-bot")
         self.assertEqual(config.openclaw_timeout_s, 7.5)
@@ -259,6 +262,25 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.openclaw_route_mode, "toggle")
         self.assertTrue(config.openclaw_toggle_initial)
         self.assertEqual(config.openclaw_toggle_hotkey, "f9")
+
+    def test_disabled_openclaw_ignores_dormant_invalid_settings(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "false",
+                "VIBEMOUSE_OPENCLAW_COMMAND": "",
+                "VIBEMOUSE_OPENCLAW_TIMEOUT_S": "invalid",
+                "VIBEMOUSE_OPENCLAW_RETRIES": "invalid",
+                "VIBEMOUSE_OPENCLAW_ROUTE_MODE": "invalid",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertFalse(config.openclaw_enabled)
+        self.assertEqual(config.openclaw_timeout_s, 20.0)
+        self.assertEqual(config.openclaw_retries, 0)
+        self.assertEqual(config.openclaw_route_mode, "always")
 
     def test_translation_fields_can_be_configured(self) -> None:
         with patch.dict(
@@ -355,7 +377,10 @@ class LoadConfigTests(unittest.TestCase):
     def test_invalid_openclaw_route_mode_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"VIBEMOUSE_OPENCLAW_ROUTE_MODE": "manual"},
+            {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
+                "VIBEMOUSE_OPENCLAW_ROUTE_MODE": "manual",
+            },
             clear=True,
         ):
             with self.assertRaisesRegex(
@@ -368,6 +393,7 @@ class LoadConfigTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
                 "VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY": "f8",
                 "VIBEMOUSE_TRANSLATION_TOGGLE_HOTKEY": "F8",
             },
@@ -430,7 +456,10 @@ class LoadConfigTests(unittest.TestCase):
     def test_empty_openclaw_command_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"VIBEMOUSE_OPENCLAW_COMMAND": "   "},
+            {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
+                "VIBEMOUSE_OPENCLAW_COMMAND": "   ",
+            },
             clear=True,
         ):
             with self.assertRaisesRegex(
@@ -442,7 +471,10 @@ class LoadConfigTests(unittest.TestCase):
     def test_non_positive_openclaw_timeout_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"VIBEMOUSE_OPENCLAW_TIMEOUT_S": "0"},
+            {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
+                "VIBEMOUSE_OPENCLAW_TIMEOUT_S": "0",
+            },
             clear=True,
         ):
             with self.assertRaisesRegex(
@@ -454,7 +486,10 @@ class LoadConfigTests(unittest.TestCase):
     def test_negative_openclaw_retries_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"VIBEMOUSE_OPENCLAW_RETRIES": "-1"},
+            {
+                "VIBEMOUSE_OPENCLAW_ENABLED": "true",
+                "VIBEMOUSE_OPENCLAW_RETRIES": "-1",
+            },
             clear=True,
         ):
             with self.assertRaisesRegex(

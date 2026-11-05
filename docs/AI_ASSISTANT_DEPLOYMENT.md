@@ -1,4 +1,8 @@
-# VibeMouse AI Assistant Deployment & Adaptation Guide
+# VibeMouse AI Assistant Deployment & Adaptation Guide (Deferred)
+
+> Historical design reference only. The OpenClaw integration is isolated and
+> disabled by default while core Windows voice-input work continues. See
+> `docs/deferred/OPENCLAW.md` for the current boundary.
 
 This guide is for AI assistants (and engineers using AI assistants) to deploy VibeMouse on a new machine and adapt it to a new platform safely.
 

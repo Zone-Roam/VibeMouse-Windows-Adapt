@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import importlib
 import json
-import shlex
 import subprocess
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pyperclip
 
@@ -21,12 +19,16 @@ from vibemouse.system_integration import (
 )
 from vibemouse.text_postprocess import UserTextProcessor
 
+if TYPE_CHECKING:
+    from vibemouse.integrations.openclaw import OpenClawDispatchResult
+
 
 class TextOutput:
     def __init__(
         self,
         *,
         system_integration: SystemIntegration | None = None,
+        openclaw_enabled: bool = False,
         openclaw_command: str = "openclaw",
         openclaw_agent: str | None = None,
         openclaw_timeout_s: float = 20.0,
@@ -62,10 +64,15 @@ class TextOutput:
             else create_system_integration()
         )
         self._hyprland_session: bool = self._system_integration.is_hyprland
-        self._openclaw_command: str = openclaw_command
-        self._openclaw_agent: str | None = openclaw_agent
-        self._openclaw_timeout_s: float = max(0.5, openclaw_timeout_s)
-        self._openclaw_retries: int = max(0, int(openclaw_retries))
+        self._openclaw_enabled = bool(openclaw_enabled)
+        self._openclaw_dispatcher: object | None = None
+        if self._openclaw_enabled:
+            self._openclaw_dispatcher = self._create_openclaw_dispatcher(
+                command=openclaw_command,
+                agent=openclaw_agent,
+                timeout_s=openclaw_timeout_s,
+                retries=openclaw_retries,
+            )
         self._text_processor: UserTextProcessor | None = None
         if user_dictionary_file is not None and text_history_file is not None:
             self._text_processor = UserTextProcessor(
@@ -117,60 +124,48 @@ class TextOutput:
 
     def send_to_openclaw_result(self, text: str) -> "OpenClawDispatchResult":
         normalized = self._prepare_text(text)
-        if not normalized:
-            return OpenClawDispatchResult(route="empty", reason="empty_text")
-
-        command = self._build_openclaw_command(normalized)
-        if command is None:
+        dispatcher = getattr(self, "_openclaw_dispatcher", None)
+        enabled = bool(getattr(self, "_openclaw_enabled", True))
+        if dispatcher is None and not enabled:
             pyperclip.copy(normalized)
-            return OpenClawDispatchResult(route="clipboard", reason="invalid_command")
+            result_type = self._openclaw_result_type()
+            return result_type(route="clipboard", reason="integration_disabled")
+        if dispatcher is None:
+            dispatcher = self._create_openclaw_dispatcher(
+                command=str(getattr(self, "_openclaw_command", "openclaw")),
+                agent=getattr(self, "_openclaw_agent", None),
+                timeout_s=float(getattr(self, "_openclaw_timeout_s", 20.0)),
+                retries=int(getattr(self, "_openclaw_retries", 0)),
+            )
+        dispatch = cast(object, getattr(dispatcher, "dispatch"))
+        return cast("OpenClawDispatchResult", dispatch(normalized))
 
-        attempts = max(1, int(getattr(self, "_openclaw_retries", 0)) + 1)
-        last_reason = "spawn_error"
-        for attempt in range(attempts):
-            try:
-                _ = subprocess.Popen(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                if attempt == 0:
-                    return OpenClawDispatchResult(
-                        route="openclaw",
-                        reason="dispatched",
-                    )
-                return OpenClawDispatchResult(
-                    route="openclaw",
-                    reason=f"dispatched_after_retry_{attempt}",
-                )
-            except OSError as error:
-                last_reason = f"spawn_error:{error.__class__.__name__}"
+    @staticmethod
+    def _create_openclaw_dispatcher(
+        *,
+        command: str,
+        agent: str | None,
+        timeout_s: float,
+        retries: int,
+    ) -> object:
+        module = importlib.import_module("vibemouse.integrations.openclaw")
+        dispatcher_type = cast(object, getattr(module, "OpenClawDispatcher"))
+        if not callable(dispatcher_type):
+            raise RuntimeError("Experimental OpenClaw dispatcher is unavailable")
+        return dispatcher_type(
+            command=command,
+            agent=agent,
+            timeout_s=timeout_s,
+            retries=retries,
+        )
 
-        pyperclip.copy(normalized)
-        return OpenClawDispatchResult(route="clipboard", reason=last_reason)
-
-    def _build_openclaw_command(self, message: str) -> list[str] | None:
-        raw_command = str(getattr(self, "_openclaw_command", "openclaw")).strip()
-        if not raw_command:
-            return None
-
-        try:
-            parts = shlex.split(raw_command)
-        except ValueError:
-            return None
-
-        if not parts:
-            return None
-
-        command = [*parts, "agent", "--message", message, "--json"]
-        agent = getattr(self, "_openclaw_agent", None)
-        if isinstance(agent, str):
-            normalized_agent = agent.strip()
-            if normalized_agent:
-                command.extend(["--agent", normalized_agent])
-        return command
+    @staticmethod
+    def _openclaw_result_type() -> object:
+        module = importlib.import_module("vibemouse.integrations.openclaw")
+        result_type = cast(object, getattr(module, "OpenClawDispatchResult"))
+        if not callable(result_type):
+            raise RuntimeError("Experimental OpenClaw result type is unavailable")
+        return result_type
 
     def _paste_clipboard(self) -> None:
         terminal_active = self._is_hyprland_terminal_active()
@@ -370,9 +365,3 @@ class _KeyHolder(Protocol):
     enter: object
     ctrl: object
     shift: object
-
-
-@dataclass(frozen=True)
-class OpenClawDispatchResult:
-    route: str
-    reason: str

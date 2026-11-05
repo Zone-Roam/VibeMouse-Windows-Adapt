@@ -33,7 +33,6 @@ class VibeMouseTrayApp:
         self.starting_until_monotonic = 0.0
         self.startup_grace_s = 90.0
 
-        self.openclaw_route_enabled = False
         self.translation_route_enabled = False
         self.translation_enabled_for_start = self._read_env_bool(
             "VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL",
@@ -55,11 +54,6 @@ class VibeMouseTrayApp:
             "VibeMouse: stopped",
             menu=pystray.Menu(
                 pystray.MenuItem(lambda _item: self._status_text(), None, enabled=False),
-                pystray.MenuItem(
-                    lambda _item: self._route_text(),
-                    None,
-                    enabled=False,
-                ),
                 pystray.MenuItem(
                     lambda _item: self._translation_text(),
                     None,
@@ -102,10 +96,7 @@ class VibeMouseTrayApp:
         env.setdefault("VIBEMOUSE_REAR_BUTTON", "x1")
         env.setdefault("VIBEMOUSE_FRONT_HOTKEY", "<ctrl>+<alt>+<shift>+f9")
         env.setdefault("VIBEMOUSE_REAR_HOTKEY", "<ctrl>+<alt>+<shift>+f10")
-        env.setdefault("VIBEMOUSE_OPENCLAW_ROUTE_MODE", "toggle")
-        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", "false")
-        env.setdefault("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8")
-        env.setdefault("VIBEMOUSE_OPENCLAW_COMMAND", "wsl -d Ubuntu -- openclaw")
+        env["VIBEMOUSE_OPENCLAW_ENABLED"] = "false"
         env.setdefault("VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL", "false")
         env["VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL"] = (
             "true" if self.translation_enabled_for_start else "false"
@@ -117,7 +108,6 @@ class VibeMouseTrayApp:
         env.setdefault("VIBEMOUSE_TRANSLATION_TIMEOUT_S", "12.0")
         env.setdefault("VIBEMOUSE_TRANSLATION_RETRIES", "1")
         env.setdefault("VIBEMOUSE_TRANSLATION_ONLY_IF_CHINESE", "true")
-        env.setdefault("VIBEMOUSE_TRANSLATION_APPLY_TO_OPENCLAW", "false")
         env.setdefault("VIBEMOUSE_STATUS_FILE", str(self.status_file))
         env.setdefault("VIBEMOUSE_CONTROL_FILE", str(self.control_file))
         env.setdefault("PYTHONUNBUFFERED", "1")
@@ -181,7 +171,6 @@ class VibeMouseTrayApp:
 
         env = self.build_env()
         _ = self._write_translation_control(self.translation_enabled_for_start)
-        self.openclaw_route_enabled = False
         self.translation_route_enabled = self.translation_enabled_for_start
         self.starting_until_monotonic = time.monotonic() + self.startup_grace_s
         self._append_log("[INFO] Starting VibeMouse process...")
@@ -259,18 +248,10 @@ class VibeMouseTrayApp:
                 return
             self._append_log(line)
             lower = line.lower()
-            if "openclaw routing: on" in lower:
-                self.openclaw_route_enabled = True
-            elif "openclaw routing: off" in lower:
-                self.openclaw_route_enabled = False
-            elif "translation routing (zh->en): on" in lower:
+            if "translation routing (zh->en): on" in lower:
                 self.translation_route_enabled = True
             elif "translation routing (zh->en): off" in lower:
                 self.translation_route_enabled = False
-            elif "openclaw_route=true" in lower:
-                self.openclaw_route_enabled = True
-            elif "openclaw_route=false" in lower:
-                self.openclaw_route_enabled = False
             elif "translation_route=true" in lower:
                 self.translation_route_enabled = True
             elif "translation_route=false" in lower:
@@ -341,10 +322,6 @@ class VibeMouseTrayApp:
         if self.state == "recording":
             return f"Status: recording (mic {int(self.audio_activity * 100)}%)"
         return "Status: idle"
-
-    def _route_text(self) -> str:
-        mode = "ON" if self.openclaw_route_enabled else "OFF"
-        return f"OpenClaw route: {mode} (toggle F8)"
 
     def _translation_text(self) -> str:
         mode = "ON" if self.translation_route_enabled else "OFF"

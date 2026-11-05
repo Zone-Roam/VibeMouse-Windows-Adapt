@@ -140,7 +140,6 @@ class UserTextProcessor:
             ],
             "replacements": {
                 "telegarm": "Telegram",
-                "open claw": "OpenClaw",
                 "chat g p t": "ChatGPT",
             },
         }

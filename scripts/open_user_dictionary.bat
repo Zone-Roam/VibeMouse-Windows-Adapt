@@ -17,7 +17,6 @@ if not exist "%DICT_FILE%" (
     echo   ],
     echo   "replacements": {
     echo     "telegarm": "Telegram",
-    echo     "open claw": "OpenClaw",
     echo     "chat g p t": "ChatGPT"
     echo   }
     echo }

@@ -108,6 +108,7 @@ class AppConfig:
     prewarm_on_start: bool
     status_file: Path
     control_file: Path
+    openclaw_enabled: bool
     openclaw_command: str
     openclaw_agent: str | None
     openclaw_timeout_s: float
@@ -229,25 +230,32 @@ def load_config() -> AppConfig:
         "enter",
         {"enter", "ctrl_enter", "shift_enter", "none"},
     )
+    openclaw_enabled = _read_bool("VIBEMOUSE_OPENCLAW_ENABLED", False)
     openclaw_command = os.getenv("VIBEMOUSE_OPENCLAW_COMMAND", "openclaw").strip()
-    if not openclaw_command:
+    if openclaw_enabled and not openclaw_command:
         raise ValueError("VIBEMOUSE_OPENCLAW_COMMAND must not be empty")
     openclaw_agent_raw = os.getenv("VIBEMOUSE_OPENCLAW_AGENT", "main").strip()
     openclaw_agent = openclaw_agent_raw if openclaw_agent_raw else None
-    openclaw_timeout_s = _require_positive_float(
-        "VIBEMOUSE_OPENCLAW_TIMEOUT_S",
-        _read_float("VIBEMOUSE_OPENCLAW_TIMEOUT_S", 20.0),
-    )
-    openclaw_retries = _require_non_negative(
-        "VIBEMOUSE_OPENCLAW_RETRIES",
-        _read_int("VIBEMOUSE_OPENCLAW_RETRIES", 0),
-    )
-    openclaw_route_mode = _read_choice(
-        "VIBEMOUSE_OPENCLAW_ROUTE_MODE",
-        "always",
-        {"always", "toggle"},
-    )
-    openclaw_toggle_initial = _read_bool("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", False)
+    if openclaw_enabled:
+        openclaw_timeout_s = _require_positive_float(
+            "VIBEMOUSE_OPENCLAW_TIMEOUT_S",
+            _read_float("VIBEMOUSE_OPENCLAW_TIMEOUT_S", 20.0),
+        )
+        openclaw_retries = _require_non_negative(
+            "VIBEMOUSE_OPENCLAW_RETRIES",
+            _read_int("VIBEMOUSE_OPENCLAW_RETRIES", 0),
+        )
+        openclaw_route_mode = _read_choice(
+            "VIBEMOUSE_OPENCLAW_ROUTE_MODE",
+            "always",
+            {"always", "toggle"},
+        )
+        openclaw_toggle_initial = _read_bool("VIBEMOUSE_OPENCLAW_TOGGLE_INITIAL", False)
+    else:
+        openclaw_timeout_s = 20.0
+        openclaw_retries = 0
+        openclaw_route_mode = "always"
+        openclaw_toggle_initial = False
     openclaw_toggle_hotkey = os.getenv("VIBEMOUSE_OPENCLAW_TOGGLE_HOTKEY", "f8").strip()
     translation_toggle_initial = _read_bool("VIBEMOUSE_TRANSLATION_TOGGLE_INITIAL", False)
     translation_toggle_hotkey = os.getenv(
@@ -255,7 +263,8 @@ def load_config() -> AppConfig:
         "none",
     ).strip()
     if (
-        openclaw_toggle_hotkey
+        openclaw_enabled
+        and openclaw_toggle_hotkey
         and translation_toggle_hotkey
         and openclaw_toggle_hotkey.lower() != "none"
         and translation_toggle_hotkey.lower() != "none"
@@ -345,6 +354,7 @@ def load_config() -> AppConfig:
         prewarm_on_start=_read_bool("VIBEMOUSE_PREWARM_ON_START", True),
         status_file=status_file,
         control_file=control_file,
+        openclaw_enabled=openclaw_enabled,
         openclaw_command=openclaw_command,
         openclaw_agent=openclaw_agent,
         openclaw_timeout_s=openclaw_timeout_s,

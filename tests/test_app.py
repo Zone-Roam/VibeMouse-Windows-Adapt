@@ -167,6 +167,7 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
             "_config",
             SimpleNamespace(
                 enter_mode="enter",
+                openclaw_enabled=True,
                 openclaw_route_mode="always",
             ),
         )
@@ -232,7 +233,11 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
                 setattr(
                     subject,
                     "_config",
-                    SimpleNamespace(enter_mode="enter", openclaw_route_mode="always"),
+                    SimpleNamespace(
+                        enter_mode="enter",
+                        openclaw_enabled=True,
+                        openclaw_route_mode="always",
+                    ),
                 )
                 setattr(subject, "_openclaw_route_lock", threading.Lock())
                 setattr(subject, "_openclaw_route_enabled", False)
@@ -313,6 +318,7 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
             "_config",
             SimpleNamespace(
                 enter_mode="enter",
+                openclaw_enabled=True,
                 openclaw_route_mode="toggle",
             ),
         )
@@ -323,6 +329,26 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
         on_rear()
 
         self.assertEqual(worker_calls, [(recording, "default")])
+
+    def test_disabled_openclaw_forces_default_route(self) -> None:
+        subject = self._make_subject()
+        setattr(
+            subject,
+            "_config",
+            SimpleNamespace(
+                openclaw_enabled=False,
+                openclaw_route_mode="always",
+            ),
+        )
+        setattr(subject, "_openclaw_route_lock", threading.Lock())
+        setattr(subject, "_openclaw_route_enabled", True)
+
+        target_for_rear = cast(
+            Callable[[], str],
+            getattr(subject, "_target_for_rear_recording"),
+        )
+
+        self.assertEqual(target_for_rear(), "default")
 
     def test_rear_press_routes_to_openclaw_when_toggle_mode_is_on(self) -> None:
         subject = self._make_subject()
@@ -345,6 +371,7 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
             "_config",
             SimpleNamespace(
                 enter_mode="enter",
+                openclaw_enabled=True,
                 openclaw_route_mode="toggle",
             ),
         )
@@ -376,6 +403,7 @@ class VoiceMouseAppInitTests(unittest.TestCase):
             gesture_freeze_pointer=True,
             gesture_restore_cursor=True,
             prewarm_on_start=False,
+            openclaw_enabled=False,
             openclaw_command="openclaw",
             openclaw_agent="main",
             openclaw_timeout_s=20.0,
