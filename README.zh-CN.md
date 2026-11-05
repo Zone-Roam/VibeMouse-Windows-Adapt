@@ -1,5 +1,7 @@
 # VibeMouse
 
+> **本仓库是 [vimalinx/VibeMouse](https://github.com/vimalinx/VibeMouse)（Apache-2.0）的 Windows 适配版。** 原项目和核心语音输入设计来自 Vimalinx。本仓库新增 Windows 支持：托盘启动器与后台运行、一键启动脚本、简易界面、实时日志，以及 OpenClaw 路由开关。
+
 面向 VibeCoding 的鼠标侧键语音输入工具。
 
 English README: [`README.md`](./README.md)

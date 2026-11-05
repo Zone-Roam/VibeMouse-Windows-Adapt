@@ -1,5 +1,7 @@
 # VibeMouse
 
+> **Windows adaptation of [vimalinx/VibeMouse](https://github.com/vimalinx/VibeMouse)** (Apache-2.0). The original project and its core voice-input design are by Vimalinx. This repository adds Windows support: a tray launcher with a hidden background runtime, one-click launch scripts, a minimal GUI, live logging and an OpenClaw routing toggle.
+
 Mouse-side-button voice input for VibeCoding.
 
 中文文档：[`README.zh-CN.md`](./README.zh-CN.md)
